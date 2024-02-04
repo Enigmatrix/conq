@@ -116,18 +116,34 @@ impl Environment {
         }
     }
 
-    fn lookup(&self, ident: &Ident) -> Option<&Value> {
+    fn lookup(&self, ident: &Ident) -> Option<Value> {
         self.frames
             .iter()
             .rev()
             .fold(None, |v, frame| v.or_else(|| frame.lookup(ident)))
+            .cloned()
     }
 
-    fn assign(&mut self, ident: Ident, val: Value) -> &Value {
+    fn declare(&mut self, ident: Ident, val: Value) -> Value {
         self.frames
             .last_mut()
             .expect("global frame not found") // literally not possible to occur
             .assign(ident, val)
+            .clone()
+    }
+
+    fn assign(&mut self, ident: Ident, val: Value) -> Value {
+        let decl_frame = self
+            .frames
+            .iter_mut()
+            .rev()
+            .skip_while(|frame| frame.lookup(&ident).is_none())
+            .next();
+        if let Some(decl_frame) = decl_frame {
+            return decl_frame.assign(ident, val).clone();
+        } else {
+            self.declare(ident, val)
+        }
     }
 
     fn scoped<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> T {
@@ -278,7 +294,7 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
         // this means that in scoped, we need to check the variable declarations then form the frame, similar to hw1
         Expr::Let { name, expr } => {
             let val = eval(*expr, env)?;
-            env.assign(name, val).clone()
+            env.declare(name, val)
         }
         Expr::Body(exprs) => env.scoped(|env| {
             exprs
@@ -290,7 +306,7 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
         })?,
         Expr::Fn { name, params, expr } => {
             let val = Value::Fn { params, expr };
-            env.assign(name, val).clone()
+            env.declare(name, val)
         }
         // TODO while expr - check the result of body eval, see if its Continue / Break
         Expr::Apply { r#fn, args } => {
@@ -309,7 +325,7 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
                     .collect::<Result<Vec<_>, _>>()?;
                 let val = env.scoped(|env| {
                     params.into_iter().zip(args).for_each(|(ident, arg)| {
-                        env.assign(ident, arg);
+                        env.declare(ident, arg);
                     });
                     eval(*expr, env)
                 })?;
