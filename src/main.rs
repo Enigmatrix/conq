@@ -3,7 +3,6 @@
  *
  */
 
-use core::panic;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -127,7 +126,7 @@ impl Environment {
     fn assign(&mut self, ident: Ident, val: Value) -> &Value {
         self.frames
             .last_mut()
-            .expect("global frame not found")
+            .expect("global frame not found") // literally not possible to occur
             .assign(ident, val)
     }
 
@@ -139,112 +138,187 @@ impl Environment {
     }
 }
 
-fn eval_unary(op: UnaryOp, val: Value) -> Value {
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EvalError {
+    TypeError {
+        expr: Expr,
+        expected: String,
+        actual: String,
+    },
+    EmptyBodyError,
+    IncorrectArgumentLength {
+        expr: Value,
+        expected: usize,
+        actual: usize,
+    },
+    ApplyOnNonFunction {
+        expr: Value,
+    },
+    IdentNotFound {
+        ident: Ident,
+    },
+}
+
+fn eval_unary(op: UnaryOp, expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
+    let val = eval(expr.clone(), env)?;
     match val {
         Value::Bool(b) => {
             if op == UnaryOp::Not {
-                Value::Bool(!b)
+                Ok(Value::Bool(!b))
             } else {
-                panic!("invalid op for bool")
+                Err(EvalError::TypeError {
+                    expr,
+                    expected: "Bool".to_string(),
+                    actual: format!("{val:?}"),
+                })
             }
         }
         Value::Int(i) => {
             if op == UnaryOp::Neg {
-                Value::Int(-i)
+                Ok(Value::Int(-i))
             } else {
-                panic!("invalid op for int")
+                Err(EvalError::TypeError {
+                    expr,
+                    expected: "Int".to_string(),
+                    actual: format!("{val:?}"),
+                })
             }
         }
-        Value::Fn { .. } => panic!("can't use unary op on functions"),
+        Value::Fn { .. } => Err(EvalError::TypeError {
+            expr,
+            expected: "Int or Bool".to_string(),
+            actual: format!("{val:?}"),
+        }),
     }
 }
 
-fn eval_infix(op: InfixOp, lhs: Value, rhs: Value) -> Value {
+fn eval_infix(
+    op: InfixOp,
+    lhs_expr: Expr,
+    rhs_expr: Expr,
+    env: &mut Environment,
+) -> Result<Value, EvalError> {
     match op {
         InfixOp::Arith(arith) => {
-            let (lhs, rhs) = match (lhs, rhs) {
+            let lhs = eval(lhs_expr.clone(), env)?;
+            let rhs = eval(rhs_expr.clone(), env)?;
+            let (lhs, rhs) = match (lhs.clone(), rhs.clone()) {
                 (Value::Int(lhs), Value::Int(rhs)) => (lhs, rhs),
-                _ => panic!("arith requires both to be int"),
+                _ => {
+                    return Err(EvalError::TypeError {
+                        expr: Expr::Body(vec![lhs_expr, rhs_expr]),
+                        expected: "both exprs should be Int".to_string(),
+                        actual: format!("{lhs:?}, {rhs:?}"),
+                    })
+                }
             };
-            Value::Int(match arith {
+            Ok(Value::Int(match arith {
                 ArithInfixOp::Add => lhs + rhs,
                 ArithInfixOp::Sub => lhs - rhs,
                 ArithInfixOp::Mul => lhs * rhs,
                 ArithInfixOp::Div => lhs / rhs,
-            })
+            }))
         }
         InfixOp::Compare(cmp) => {
-            let (lhs, rhs) = match (lhs, rhs) {
+            let lhs = eval(lhs_expr.clone(), env)?;
+            let rhs = eval(rhs_expr.clone(), env)?;
+            let (lhs, rhs) = match (lhs.clone(), rhs.clone()) {
                 (Value::Int(lhs), Value::Int(rhs)) => (lhs, rhs),
                 (Value::Bool(lhs), Value::Bool(rhs)) => {
                     (if lhs { 1 } else { 0 }, if rhs { 1 } else { 0 })
                 }
-                _ => panic!("cmp requires both to be same type"),
+                _ => {
+                    return Err(EvalError::TypeError {
+                        expr: Expr::Body(vec![lhs_expr, rhs_expr]),
+                        expected: "both exprs should be Int".to_string(),
+                        actual: format!("{lhs:?}, {rhs:?}"),
+                    })
+                }
             };
-            Value::Bool(match cmp {
+            Ok(Value::Bool(match cmp {
                 CompareInfixOp::Gt => lhs > rhs,
                 CompareInfixOp::Lt => lhs < rhs,
                 CompareInfixOp::Gte => lhs >= rhs,
                 CompareInfixOp::Lte => lhs <= rhs,
                 CompareInfixOp::Eq => lhs == rhs,
                 CompareInfixOp::Neq => lhs != rhs,
-            })
+            }))
         }
         InfixOp::Logical(logical) => {
-            let (lhs, rhs) = match (lhs, rhs) {
-                (Value::Bool(lhs), Value::Bool(rhs)) => (lhs, rhs),
-                _ => panic!("logical requires both to be int"),
-            };
-            Value::Bool(match logical {
-                // TODO this is eager...
-                LogicalInfixOp::Or => lhs || rhs,
-                LogicalInfixOp::And => lhs && rhs,
-            })
+            fn to_bool(expr: Expr, env: &mut Environment) -> Result<bool, EvalError> {
+                let v = eval(expr.clone(), env)?;
+                match v {
+                    Value::Bool(b) => Ok(b),
+                    _ => Err(EvalError::TypeError {
+                        expr: expr,
+                        expected: "Bool".to_string(),
+                        actual: format!("{v:?}"),
+                    }),
+                }
+            }
+
+            Ok(Value::Bool(match logical {
+                LogicalInfixOp::Or => to_bool(lhs_expr, env)? || to_bool(rhs_expr, env)?,
+                LogicalInfixOp::And => to_bool(lhs_expr, env)? && to_bool(rhs_expr, env)?,
+            }))
         }
     }
 }
 
-fn eval(expr: Expr, env: &mut Environment) -> Value {
-    // TODO make this return a result
-    match expr {
-        Expr::Ident(ident) => env.lookup(&ident).expect("ident not found").clone(),
+fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
+    Ok(match expr {
+        Expr::Ident(ident) => env
+            .lookup(&ident)
+            .ok_or(EvalError::IdentNotFound { ident })?
+            .clone(),
         Expr::Literal(val) => val,
-        Expr::Unary { op, expr } => eval_unary(op, eval(*expr, env)),
-        Expr::Infix { op, lhs, rhs } => eval_infix(op, eval(*lhs, env), eval(*rhs, env)),
+        Expr::Unary { op, expr } => eval_unary(op, *expr, env)?,
+        Expr::Infix { op, lhs, rhs } => eval_infix(op, *lhs, *rhs, env)?,
+        // TODO assignment. in assignment, we have to check where the variable is defined (which frame) then set it.
+        // this means that in scoped, we need to check the variable declarations then form the frame, similar to hw1
         Expr::Let { name, expr } => {
-            let val = eval(*expr, env);
+            let val = eval(*expr, env)?;
             env.assign(name, val).clone()
         }
         Expr::Body(exprs) => env.scoped(|env| {
             exprs
                 .into_iter()
                 .map(|expr| eval(expr, env))
-                .last()
-                .expect("body empty")
-        }), // sequence is always non-empty
+                .collect::<Result<Vec<_>, _>>()
+                .and_then(|vals| vals.last().cloned().ok_or(EvalError::EmptyBodyError))
+            // TODO maybe we defined a Void value and return that instead
+        })?,
         Expr::Fn { name, params, expr } => {
             let val = Value::Fn { params, expr };
             env.assign(name, val).clone()
         }
+        // TODO while expr - check the result of body eval, see if its Continue / Break
         Expr::Apply { r#fn, args } => {
-            let r#fn = eval(*r#fn, env);
-            if let Value::Fn { params, expr } = r#fn {
+            let r#fn = eval(*r#fn, env)?;
+            if let Value::Fn { params, expr } = r#fn.clone() {
                 if params.len() != args.len() {
-                    panic!("wrong number of arguments to function");
+                    return Err(EvalError::IncorrectArgumentLength {
+                        expr: r#fn,
+                        expected: args.len(),
+                        actual: args.len(),
+                    });
                 }
-                let args: Vec<_> = args.into_iter().map(|arg| eval(arg, env)).collect();
+                let args = args
+                    .into_iter()
+                    .map(|arg| eval(arg, env))
+                    .collect::<Result<Vec<_>, _>>()?;
                 let val = env.scoped(|env| {
                     params.into_iter().zip(args).for_each(|(ident, arg)| {
                         env.assign(ident, arg);
                     });
                     eval(*expr, env)
-                });
+                })?;
                 val
             } else {
-                panic!("can't apply on non-func");
+                return Err(EvalError::ApplyOnNonFunction { expr: r#fn });
             }
         }
-    }
+    })
 }
 
 fn main() {
