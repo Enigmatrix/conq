@@ -182,14 +182,10 @@ enum EvalError {
         expected: String,
         actual: String,
     },
-    EmptyBodyError,
     IncorrectArgumentLength {
-        expr: Value,
+        expr: Expr,
         expected: usize,
         actual: usize,
-    },
-    ApplyOnNonFunction {
-        expr: Value,
     },
     IdentNotFound {
         ident: Ident,
@@ -325,20 +321,18 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
                 .into_iter()
                 .map(|expr| eval(expr, env))
                 .collect::<Result<Vec<_>, _>>()
-                .and_then(|vals| vals.last().cloned().ok_or(EvalError::EmptyBodyError))
-            // TODO maybe we defined a Void value and return that instead
+                .map(|vals| vals.last().cloned().unwrap_or(Value::Void))
         })?,
         Expr::Fn { name, params, expr } => {
             let val = Value::Fn { params, expr };
             env.declare(name, val)
         }
-        // TODO while expr - check the result of body eval, see if its Continue / Break
         Expr::Apply { r#fn, args } => {
-            let r#fn = eval(*r#fn, env)?;
-            if let Value::Fn { params, expr } = r#fn.clone() {
+            let fn_val = eval(*r#fn.clone(), env)?;
+            if let Value::Fn { params, expr } = fn_val.clone() {
                 if params.len() != args.len() {
                     return Err(EvalError::IncorrectArgumentLength {
-                        expr: r#fn,
+                        expr: *r#fn,
                         expected: args.len(),
                         actual: args.len(),
                     });
@@ -355,7 +349,11 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
                 })?;
                 val
             } else {
-                return Err(EvalError::ApplyOnNonFunction { expr: r#fn });
+                return Err(EvalError::TypeError {
+                    expr: *r#fn,
+                    expected: "Fn".to_string(),
+                    actual: format!("{fn_val:?}"),
+                });
             }
         }
         Expr::Cond { pred, conseq, alt } => {
@@ -423,6 +421,63 @@ fn main() {
             }),
         }),
     };
+    // let a = 0;
+    // let b = 1;
+    // while (n > 0) {
+    //    let c = a + b;
+    //    a = b;
+    //    b = c;
+    //    n = n - 1; }
+    // a
+
+    let fib_iter = Expr::Fn {
+        name: Ident("fib_iter".to_string()),
+        params: vec![Ident("n".to_string())],
+        expr: Box::new(Expr::Body(vec![
+            Expr::Let {
+                name: Ident("a".to_string()),
+                expr: Box::new(Expr::Literal(Value::Int(0))),
+            },
+            Expr::Let {
+                name: Ident("b".to_string()),
+                expr: Box::new(Expr::Literal(Value::Int(1))),
+            },
+            Expr::While {
+                pred: Box::new(Expr::Infix {
+                    op: InfixOp::Compare(CompareInfixOp::Gt),
+                    lhs: Box::new(Expr::Ident(Ident("n".to_string()))),
+                    rhs: Box::new(Expr::Literal(Value::Int(0))),
+                }),
+                body: Box::new(Expr::Body(vec![
+                    Expr::Let {
+                        name: Ident("c".to_string()),
+                        expr: Box::new(Expr::Infix {
+                            op: InfixOp::Arith(ArithInfixOp::Add),
+                            lhs: Box::new(Expr::Ident(Ident("a".to_string()))),
+                            rhs: Box::new(Expr::Ident(Ident("b".to_string()))),
+                        }),
+                    },
+                    Expr::Assign {
+                        name: Ident("a".to_string()),
+                        expr: Box::new(Expr::Ident(Ident("b".to_string()))),
+                    },
+                    Expr::Assign {
+                        name: Ident("b".to_string()),
+                        expr: Box::new(Expr::Ident(Ident("c".to_string()))),
+                    },
+                    Expr::Assign {
+                        name: Ident("n".to_string()),
+                        expr: Box::new(Expr::Infix {
+                            op: InfixOp::Arith(ArithInfixOp::Sub),
+                            lhs: Box::new(Expr::Ident(Ident("n".to_string()))),
+                            rhs: Box::new(Expr::Literal(Value::Int(1))),
+                        }),
+                    },
+                ])),
+            },
+            Expr::Ident(Ident("a".to_string())),
+        ])),
+    };
 
     let add = Expr::Fn {
         name: Ident("add".to_string()),
@@ -448,8 +503,9 @@ fn main() {
     // let body = Expr::Body(vec![add, val]);
     let body = Expr::Body(vec![
         fib,
+        fib_iter,
         Expr::Apply {
-            r#fn: Box::new(Expr::Ident(Ident("fib".to_string()))),
+            r#fn: Box::new(Expr::Ident(Ident("fib_iter".to_string()))),
             args: vec![Expr::Literal(Value::Int(19))],
         },
     ]);
