@@ -77,6 +77,8 @@ enum Expr {
         expr: Box<Expr>,
     },
     Body(Vec<Expr>),
+    Break,
+    Continue,
     Cond {
         pred: Box<Expr>,
         conseq: Box<Expr>,
@@ -376,6 +378,8 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
             }
             ret_value
         }
+        Expr::Break => Err(EvalError::ControlFlow(ControlFlow::Break))?,
+        Expr::Continue => Err(EvalError::ControlFlow(ControlFlow::Continue))?,
     })
 }
 
