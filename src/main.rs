@@ -79,6 +79,7 @@ enum Expr {
     Body(Vec<Expr>),
     Break,
     Continue,
+    Return(Box<Expr>),
     Cond {
         pred: Box<Expr>,
         conseq: Box<Expr>,
@@ -174,7 +175,7 @@ impl Environment {
 enum ControlFlow {
     Break,
     Continue,
-    // Return
+    Return(Value),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -347,7 +348,12 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
                     params.into_iter().zip(args).for_each(|(ident, arg)| {
                         env.declare(ident, arg);
                     });
-                    eval(*expr, env)
+                    let val = eval(*expr, env);
+                    match val {
+                        Ok(val) => Ok(val),
+                        Err(EvalError::ControlFlow(ControlFlow::Return(val))) => Ok(val),
+                        Err(err) => Err(err), // notably, break and continue are not handled, parser should reject them in non-while loops
+                    }
                 })?;
                 val
             } else {
@@ -373,6 +379,7 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
                     Ok(value) => ret_value = value,
                     Err(EvalError::ControlFlow(ControlFlow::Break)) => break,
                     Err(EvalError::ControlFlow(ControlFlow::Continue)) => continue,
+                    // Return is just forwarded
                     Err(err) => Err(err)?,
                 }
             }
@@ -380,6 +387,9 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
         }
         Expr::Break => Err(EvalError::ControlFlow(ControlFlow::Break))?,
         Expr::Continue => Err(EvalError::ControlFlow(ControlFlow::Continue))?,
+        Expr::Return(expr) => Err(EvalError::ControlFlow(ControlFlow::Return(eval(
+            *expr, env,
+        )?)))?,
     })
 }
 
@@ -479,7 +489,7 @@ fn main() {
                     },
                 ])),
             },
-            Expr::Ident(Ident("a".to_string())),
+            Expr::Return(Box::new(Expr::Ident(Ident("a".to_string())))),
         ])),
     };
 
