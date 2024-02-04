@@ -196,15 +196,15 @@ enum EvalError {
     ControlFlow(ControlFlow),
 }
 
-fn eval_unary(op: UnaryOp, expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
-    let val = eval(expr.clone(), env)?;
+fn eval_unary(op: UnaryOp, expr: &Expr, env: &mut Environment) -> Result<Value, EvalError> {
+    let val = eval(expr, env)?;
     match val {
         Value::Bool(b) => {
             if op == UnaryOp::Not {
                 Ok(Value::Bool(!b))
             } else {
                 Err(EvalError::TypeError {
-                    expr,
+                    expr: expr.clone(),
                     expected: "Bool".to_string(),
                     actual: format!("{val:?}"),
                 })
@@ -215,14 +215,14 @@ fn eval_unary(op: UnaryOp, expr: Expr, env: &mut Environment) -> Result<Value, E
                 Ok(Value::Int(-i))
             } else {
                 Err(EvalError::TypeError {
-                    expr,
+                    expr: expr.clone(),
                     expected: "Int".to_string(),
                     actual: format!("{val:?}"),
                 })
             }
         }
         Value::Fn { .. } | Value::Void => Err(EvalError::TypeError {
-            expr,
+            expr: expr.clone(),
             expected: "Int or Bool".to_string(),
             actual: format!("{val:?}"),
         }),
@@ -231,19 +231,19 @@ fn eval_unary(op: UnaryOp, expr: Expr, env: &mut Environment) -> Result<Value, E
 
 fn eval_infix(
     op: InfixOp,
-    lhs_expr: Expr,
-    rhs_expr: Expr,
+    lhs_expr: &Expr,
+    rhs_expr: &Expr,
     env: &mut Environment,
 ) -> Result<Value, EvalError> {
     match op {
         InfixOp::Arith(arith) => {
-            let lhs = eval(lhs_expr.clone(), env)?;
-            let rhs = eval(rhs_expr.clone(), env)?;
+            let lhs = eval(lhs_expr, env)?;
+            let rhs = eval(rhs_expr, env)?;
             let (lhs, rhs) = match (lhs.clone(), rhs.clone()) {
                 (Value::Int(lhs), Value::Int(rhs)) => (lhs, rhs),
                 _ => {
                     return Err(EvalError::TypeError {
-                        expr: Expr::Body(vec![lhs_expr, rhs_expr]),
+                        expr: Expr::Body(vec![lhs_expr.clone(), rhs_expr.clone()]),
                         expected: "both exprs should be Int".to_string(),
                         actual: format!("{lhs:?}, {rhs:?}"),
                     })
@@ -257,8 +257,8 @@ fn eval_infix(
             }))
         }
         InfixOp::Compare(cmp) => {
-            let lhs = eval(lhs_expr.clone(), env)?;
-            let rhs = eval(rhs_expr.clone(), env)?;
+            let lhs = eval(lhs_expr, env)?;
+            let rhs = eval(rhs_expr, env)?;
             let (lhs, rhs) = match (lhs.clone(), rhs.clone()) {
                 (Value::Int(lhs), Value::Int(rhs)) => (lhs, rhs),
                 (Value::Bool(lhs), Value::Bool(rhs)) => {
@@ -266,7 +266,7 @@ fn eval_infix(
                 }
                 _ => {
                     return Err(EvalError::TypeError {
-                        expr: Expr::Body(vec![lhs_expr, rhs_expr]),
+                        expr: Expr::Body(vec![lhs_expr.clone(), rhs_expr.clone()]),
                         expected: "both exprs should be Int".to_string(),
                         actual: format!("{lhs:?}, {rhs:?}"),
                     })
@@ -282,12 +282,12 @@ fn eval_infix(
             }))
         }
         InfixOp::Logical(logical) => {
-            fn to_bool(expr: Expr, env: &mut Environment) -> Result<bool, EvalError> {
-                let v = eval(expr.clone(), env)?;
+            fn to_bool(expr: &Expr, env: &mut Environment) -> Result<bool, EvalError> {
+                let v = eval(&expr, env)?;
                 match v {
                     Value::Bool(b) => Ok(b),
                     _ => Err(EvalError::TypeError {
-                        expr: expr,
+                        expr: expr.clone(),
                         expected: "Bool".to_string(),
                         actual: format!("{v:?}"),
                     }),
@@ -302,22 +302,24 @@ fn eval_infix(
     }
 }
 
-fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
+fn eval(expr: &Expr, env: &mut Environment) -> Result<Value, EvalError> {
     Ok(match expr {
         Expr::Ident(ident) => env
             .lookup(&ident)
-            .ok_or(EvalError::IdentNotFound { ident })?
+            .ok_or(EvalError::IdentNotFound {
+                ident: ident.clone(),
+            })?
             .clone(),
-        Expr::Literal(val) => val,
-        Expr::Unary { op, expr } => eval_unary(op, *expr, env)?,
-        Expr::Infix { op, lhs, rhs } => eval_infix(op, *lhs, *rhs, env)?,
+        Expr::Literal(val) => val.clone(),
+        Expr::Unary { op, expr } => eval_unary(op.clone(), expr, env)?,
+        Expr::Infix { op, lhs, rhs } => eval_infix(op.clone(), lhs, rhs, env)?,
         Expr::Let { name, expr } => {
-            let val = eval(*expr, env)?;
-            env.declare(name, val)
+            let val = eval(expr, env)?;
+            env.declare(name.clone(), val)
         }
         Expr::Assign { name, expr } => {
-            let val = eval(*expr, env)?;
-            env.assign(name, val)?
+            let val = eval(expr, env)?;
+            env.assign(name.clone(), val)?
         }
         Expr::Body(exprs) => env.scoped(|env| {
             exprs
@@ -327,15 +329,18 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
                 .map(|vals| vals.last().cloned().unwrap_or(Value::Void))
         })?,
         Expr::Fn { name, params, expr } => {
-            let val = Value::Fn { params, expr };
-            env.declare(name, val)
+            let val = Value::Fn {
+                params: params.clone(),
+                expr: expr.clone(),
+            };
+            env.declare(name.clone(), val)
         }
         Expr::Apply { r#fn, args } => {
-            let fn_val = eval(*r#fn.clone(), env)?;
+            let fn_val = eval(r#fn, env)?;
             if let Value::Fn { params, expr } = fn_val.clone() {
                 if params.len() != args.len() {
                     return Err(EvalError::IncorrectArgumentLength {
-                        expr: *r#fn,
+                        expr: *r#fn.clone(),
                         expected: args.len(),
                         actual: args.len(),
                     });
@@ -348,7 +353,7 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
                     params.into_iter().zip(args).for_each(|(ident, arg)| {
                         env.declare(ident, arg);
                     });
-                    let val = eval(*expr, env);
+                    let val = eval(&expr, env);
                     match val {
                         Ok(val) => Ok(val),
                         Err(EvalError::ControlFlow(ControlFlow::Return(val))) => Ok(val),
@@ -358,23 +363,23 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
                 val
             } else {
                 return Err(EvalError::TypeError {
-                    expr: *r#fn,
+                    expr: *r#fn.clone(),
                     expected: "Fn".to_string(),
                     actual: format!("{fn_val:?}"),
                 });
             }
         }
         Expr::Cond { pred, conseq, alt } => {
-            if eval(*pred, env)? == Value::Bool(true) {
-                eval(*conseq, env)?
+            if eval(pred, env)? == Value::Bool(true) {
+                eval(conseq, env)?
             } else {
-                eval(*alt, env)?
+                eval(alt, env)?
             }
         }
         Expr::While { pred, body } => {
             let mut ret_value = Value::Void;
-            while eval(*pred.clone(), env)? == Value::Bool(true) {
-                let result = eval(*body.clone(), env);
+            while eval(pred, env)? == Value::Bool(true) {
+                let result = eval(body, env);
                 match result {
                     Ok(value) => ret_value = value,
                     Err(EvalError::ControlFlow(ControlFlow::Break)) => break,
@@ -388,7 +393,7 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
         Expr::Break => Err(EvalError::ControlFlow(ControlFlow::Break))?,
         Expr::Continue => Err(EvalError::ControlFlow(ControlFlow::Continue))?,
         Expr::Return(expr) => Err(EvalError::ControlFlow(ControlFlow::Return(eval(
-            *expr, env,
+            expr, env,
         )?)))?,
     })
 }
@@ -523,6 +528,6 @@ fn main() {
             args: vec![Expr::Literal(Value::Int(19))],
         },
     ]);
-    let val = eval(body, &mut env);
+    let val = eval(&body, &mut env);
     println!("Hello, world! {val:?}");
 }
