@@ -71,7 +71,16 @@ enum Expr {
         name: Ident,
         expr: Box<Expr>,
     },
+    Assign {
+        name: Ident,
+        expr: Box<Expr>,
+    },
     Body(Vec<Expr>),
+    Cond {
+        pred: Box<Expr>,
+        conseq: Box<Expr>,
+        alt: Box<Expr>,
+    },
     Fn {
         name: Ident,
         params: Vec<Ident>,
@@ -132,7 +141,7 @@ impl Environment {
             .clone()
     }
 
-    fn assign(&mut self, ident: Ident, val: Value) -> Value {
+    fn assign(&mut self, ident: Ident, val: Value) -> Result<Value, EvalError> {
         let decl_frame = self
             .frames
             .iter_mut()
@@ -140,9 +149,9 @@ impl Environment {
             .skip_while(|frame| frame.lookup(&ident).is_none())
             .next();
         if let Some(decl_frame) = decl_frame {
-            return decl_frame.assign(ident, val).clone();
+            Ok(decl_frame.assign(ident, val).clone())
         } else {
-            self.declare(ident, val)
+            Err(EvalError::IdentNotFound { ident })
         }
     }
 
@@ -290,11 +299,13 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
         Expr::Literal(val) => val,
         Expr::Unary { op, expr } => eval_unary(op, *expr, env)?,
         Expr::Infix { op, lhs, rhs } => eval_infix(op, *lhs, *rhs, env)?,
-        // TODO assignment. in assignment, we have to check where the variable is defined (which frame) then set it.
-        // this means that in scoped, we need to check the variable declarations then form the frame, similar to hw1
         Expr::Let { name, expr } => {
             let val = eval(*expr, env)?;
             env.declare(name, val)
+        }
+        Expr::Assign { name, expr } => {
+            let val = eval(*expr, env)?;
+            env.assign(name, val)?
         }
         Expr::Body(exprs) => env.scoped(|env| {
             exprs
@@ -334,11 +345,59 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
                 return Err(EvalError::ApplyOnNonFunction { expr: r#fn });
             }
         }
+        Expr::Cond { pred, conseq, alt } => {
+            if eval(*pred, env)? == Value::Bool(true) {
+                eval(*conseq, env)?
+            } else {
+                eval(*alt, env)?
+            }
+        }
     })
 }
 
 fn main() {
     let mut env = Environment::new();
+
+    let fib = Expr::Fn {
+        name: Ident("fib".to_string()),
+        params: vec![Ident("n".to_string())],
+        expr: Box::new(Expr::Cond {
+            pred: Box::new(Expr::Infix {
+                op: InfixOp::Compare(CompareInfixOp::Eq),
+                lhs: Box::new(Expr::Ident(Ident("n".to_string()))),
+                rhs: Box::new(Expr::Literal(Value::Int(0))),
+            }),
+            conseq: Box::new(Expr::Literal(Value::Int(0))),
+            alt: Box::new(Expr::Cond {
+                pred: Box::new(Expr::Infix {
+                    op: InfixOp::Compare(CompareInfixOp::Eq),
+                    lhs: Box::new(Expr::Ident(Ident("n".to_string()))),
+                    rhs: Box::new(Expr::Literal(Value::Int(1))),
+                }),
+                conseq: Box::new(Expr::Literal(Value::Int(1))),
+                alt: Box::new(Expr::Infix {
+                    op: InfixOp::Arith(ArithInfixOp::Add),
+                    lhs: Box::new(Expr::Apply {
+                        r#fn: Box::new(Expr::Ident(Ident("fib".to_string()))),
+                        args: vec![Expr::Infix {
+                            op: InfixOp::Arith(ArithInfixOp::Sub),
+                            lhs: Box::new(Expr::Ident(Ident("n".to_string()))),
+                            rhs: Box::new(Expr::Literal(Value::Int(1))),
+                        }],
+                    }),
+                    rhs: Box::new(Expr::Apply {
+                        r#fn: Box::new(Expr::Ident(Ident("fib".to_string()))),
+                        args: vec![Expr::Infix {
+                            op: InfixOp::Arith(ArithInfixOp::Sub),
+                            lhs: Box::new(Expr::Ident(Ident("n".to_string()))),
+                            rhs: Box::new(Expr::Literal(Value::Int(2))),
+                        }],
+                    }),
+                }),
+            }),
+        }),
+    };
+
     let add = Expr::Fn {
         name: Ident("add".to_string()),
         params: vec![Ident("a".to_string())],
@@ -360,7 +419,14 @@ fn main() {
         }),
         args: vec![Expr::Literal(Value::Int(4))],
     };
-    let body = Expr::Body(vec![add, val]);
+    // let body = Expr::Body(vec![add, val]);
+    let body = Expr::Body(vec![
+        fib,
+        Expr::Apply {
+            r#fn: Box::new(Expr::Ident(Ident("fib".to_string()))),
+            args: vec![Expr::Literal(Value::Int(19))],
+        },
+    ]);
     let val = eval(body, &mut env);
     println!("Hello, world! {val:?}");
 }
