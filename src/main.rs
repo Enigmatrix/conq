@@ -10,6 +10,7 @@ struct Ident(String);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Value {
+    Void,
     Bool(bool),
     // Float(f64),
     Int(i64),
@@ -80,6 +81,10 @@ enum Expr {
         pred: Box<Expr>,
         conseq: Box<Expr>,
         alt: Box<Expr>,
+    },
+    While {
+        pred: Box<Expr>,
+        body: Box<Expr>,
     },
     Fn {
         name: Ident,
@@ -164,6 +169,13 @@ impl Environment {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+enum ControlFlow {
+    Break,
+    Continue,
+    // Return
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum EvalError {
     TypeError {
         expr: Expr,
@@ -182,6 +194,7 @@ enum EvalError {
     IdentNotFound {
         ident: Ident,
     },
+    ControlFlow(ControlFlow),
 }
 
 fn eval_unary(op: UnaryOp, expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
@@ -209,7 +222,7 @@ fn eval_unary(op: UnaryOp, expr: Expr, env: &mut Environment) -> Result<Value, E
                 })
             }
         }
-        Value::Fn { .. } => Err(EvalError::TypeError {
+        Value::Fn { .. } | Value::Void => Err(EvalError::TypeError {
             expr,
             expected: "Int or Bool".to_string(),
             actual: format!("{val:?}"),
@@ -351,6 +364,19 @@ fn eval(expr: Expr, env: &mut Environment) -> Result<Value, EvalError> {
             } else {
                 eval(*alt, env)?
             }
+        }
+        Expr::While { pred, body } => {
+            let mut ret_value = Value::Void;
+            while eval(*pred.clone(), env)? == Value::Bool(true) {
+                let result = eval(*body.clone(), env);
+                match result {
+                    Ok(value) => ret_value = value,
+                    Err(EvalError::ControlFlow(ControlFlow::Break)) => break,
+                    Err(EvalError::ControlFlow(ControlFlow::Continue)) => continue,
+                    Err(err) => Err(err)?,
+                }
+            }
+            ret_value
         }
     })
 }
