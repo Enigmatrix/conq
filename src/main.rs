@@ -1,18 +1,64 @@
-use std::sync::Arc;
+use std::{sync::Arc, vec};
 
-use crate::{
-    env::Environment,
-    eval::Evaluator,
-    expr::{ArithInfixOp, CompareInfixOp, Expr, InfixOp},
-    val::{Ident, PredefinedFnImpl, Value},
-};
+use crate::env::Environment;
+use crate::expr::{ArithInfixOp, CompareInfixOp, Expr, InfixOp};
+use crate::rt::Runtime;
+use crate::val::{Ident, PredefinedFnImpl, Value};
 
 mod env;
 mod err;
 mod eval;
 mod expr;
 mod instr;
+mod rt;
 mod val;
+
+///
+/// launch while (i < 100) {
+///     if (i % 2 == print_on_mod_value) {
+///         display(i);
+///     } else {
+///         yield;
+///     }
+///     i = i + 1;
+/// }
+///
+fn suspending_while_loop(print_on_mod_value: i64) -> Expr {
+    Expr::Launch(Box::new(Expr::While {
+        // Launch while loop as a task
+        pred: Box::new(Expr::Infix {
+            op: InfixOp::Compare(CompareInfixOp::Lt),
+            lhs: Box::new(Expr::Ident(Ident("i".to_string()))),
+            rhs: Box::new(Expr::Literal(Value::Int(100))),
+        }),
+        body: Box::new(Expr::Body(vec![
+            Expr::Cond {
+                pred: Box::new(Expr::Infix {
+                    op: InfixOp::Compare(CompareInfixOp::Eq),
+                    lhs: Box::new(Expr::Literal(Value::Int(print_on_mod_value))),
+                    rhs: Box::new(Expr::Infix {
+                        op: InfixOp::Arith(ArithInfixOp::Mod),
+                        lhs: Box::new(Expr::Ident(Ident("i".to_string()))),
+                        rhs: Box::new(Expr::Literal(Value::Int(2))),
+                    }),
+                }),
+                conseq: Box::new(Expr::Body(vec![Expr::Apply {
+                    r#fn: Box::new(Expr::Ident(Ident("display".to_string()))),
+                    args: vec![Expr::Ident(Ident("i".to_string()))],
+                }])),
+                alt: Box::new(Expr::Body(vec![Expr::Yield])), // YIELD TASK
+            },
+            Expr::Assign {
+                name: Ident("i".to_string()),
+                expr: Box::new(Expr::Infix {
+                    op: InfixOp::Arith(ArithInfixOp::Add),
+                    lhs: Box::new(Expr::Ident(Ident("i".to_string()))),
+                    rhs: Box::new(Expr::Literal(Value::Int(1))),
+                }),
+            },
+        ])),
+    }))
+}
 
 fn main() {
     let mut env = Environment::new();
@@ -162,7 +208,34 @@ fn main() {
             args: vec![Expr::Literal(Value::Int(19))],
         },
     ]);
-    let mut evaluator = Evaluator::new(env);
-    let val = evaluator.eval(body);
-    println!("Hello, world! {val:?}");
+
+    // let i = 0
+    // launch while (i < 100) {
+    //     if (i % 2 == 0) {
+    //         display(i);
+    //     } else {
+    //         yield;
+    //     }
+    //     i = i + 1;
+    // }
+    // launch while (i < 100) {
+    //     if (i % 2 == 1) {
+    //         display(i);
+    //     } else {
+    //         yield;
+    //     }
+    //     i = i + 1;
+    // }
+
+    let body = Expr::Body(vec![
+        Expr::Let {
+            name: Ident("i".to_string()),
+            expr: Box::new(Expr::Literal(Value::Int(0))),
+        },
+        suspending_while_loop(0),
+        suspending_while_loop(1),
+    ]);
+    let mut evaluator = Runtime::new(body, env);
+    let val = evaluator.eval();
+    println!("Ran to completion. Last evaluation result: {val:?}");
 }

@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use crate::env::Environment;
 use crate::err::{ControlFlow, EvalError, Type};
 use crate::expr::{ArithInfixOp, CompareInfixOp, Expr, InfixOp, LogicalInfixOp, UnaryOp};
@@ -11,18 +13,27 @@ pub enum Control {
 }
 
 pub struct Evaluator {
+    id: usize,
     control: Vec<Control>,
     stack: Vec<Value>,
     env: Environment,
 }
 
+static EVALUATOR_ID: AtomicUsize = AtomicUsize::new(0);
+
 impl Evaluator {
-    pub fn new(env: Environment) -> Evaluator {
+    pub fn new(expr: Expr, env: Environment) -> Evaluator {
+        let id = EVALUATOR_ID.fetch_add(1, Ordering::SeqCst);
         Evaluator {
-            control: Vec::new(),
+            id,
+            control: vec![Control::Expr(expr)],
             stack: Vec::new(),
             env,
         }
+    }
+
+    pub fn id(&self) -> usize {
+        self.id
     }
 
     fn pop_stack(&mut self) -> Value {
@@ -175,13 +186,13 @@ impl Evaluator {
                     if exprs.len() == 0 {
                         self.control.push(Control::Expr(Expr::Literal(Value::Void)))
                     } else {
-                    exprs.into_iter().rev().enumerate().for_each(|(idx, expr)| {
-                        if idx != 0 {
-                            self.control.push(Control::Instruction(Instruction::Pop))
-                        } else {
-                            self.control.push(Control::Instruction(Instruction::PopEnv))
-                        }
-                        self.control.push(Control::Expr(expr))
+                        exprs.into_iter().rev().enumerate().for_each(|(idx, expr)| {
+                            if idx != 0 {
+                                self.control.push(Control::Instruction(Instruction::Pop))
+                            } else {
+                                self.control.push(Control::Instruction(Instruction::PopEnv))
+                            }
+                            self.control.push(Control::Expr(expr))
                         })
                     };
                 }
@@ -223,20 +234,27 @@ impl Evaluator {
                         .rev()
                         .for_each(|expr| self.control.push(Control::Expr(expr)));
                 }
-                Expr::Launch(expr) => return Err(EvalError::ControlFlow(ControlFlow::Launch { expr: *expr, env: self.env.clone() })),
-                Expr::Yield => return Err(EvalError::ControlFlow(ControlFlow::Yield))
+                Expr::Launch(expr) => {
+                    self.control.push(Control::Expr(Expr::Literal(Value::Void)));
+                    return Err(EvalError::ControlFlow(ControlFlow::Launch {
+                        expr: *expr,
+                        env: self.env.clone(),
+                    }));
+                }
+                Expr::Yield => {
+                    self.control.push(Control::Expr(Expr::Literal(Value::Void)));
+                    return Err(EvalError::ControlFlow(ControlFlow::Yield));
+                }
             },
         }
         Ok(())
     }
 
-    pub fn eval(&mut self, expr: Expr) -> Result<Value, EvalError> {
-        self.control.push(Control::Expr(expr));
-
-        // println!("control: {:?}\n stack: {:?}\n", self.control, self.stack);
+    pub fn eval(&mut self) -> Result<Value, EvalError> {
+        //println!("control: {:?}\n stack: {:?}\n", self.control, self.stack);
         while let Some(control) = self.control.pop() {
             self.eval_one(control)?;
-            // println!("control: {:?}\n stack: {:?}\n", self.control, self.stack);
+            //println!("control: {:?}\n stack: {:?}\n", self.control, self.stack);
         }
         if self.stack.len() > 1 {
             panic!("stack remnants found");
