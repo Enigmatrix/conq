@@ -2,7 +2,7 @@ use crate::val::{Ident, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Frame {
     inner: Arc<RwLock<HashMap<Ident, Value>>>,
 }
@@ -25,7 +25,15 @@ impl Frame {
     }
 }
 
-#[derive(Clone)]
+impl PartialEq for Frame {
+    fn eq(&self, other: &Self) -> bool {
+        false
+    }
+}
+
+impl Eq for Frame {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Environment {
     frames: Vec<Frame>,
 }

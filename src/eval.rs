@@ -1,5 +1,5 @@
 use crate::env::Environment;
-use crate::err::{EvalError, Type};
+use crate::err::{ControlFlow, EvalError, Type};
 use crate::expr::{ArithInfixOp, CompareInfixOp, Expr, InfixOp, LogicalInfixOp, UnaryOp};
 use crate::instr::Instruction;
 use crate::val::Value;
@@ -219,6 +219,8 @@ impl Evaluator {
                         .rev()
                         .for_each(|expr| self.control.push(Control::Expr(expr)));
                 }
+                Expr::Launch(expr) => return Err(EvalError::ControlFlow(ControlFlow::Launch { expr: *expr, env: self.env.clone() })),
+                Expr::Yield => return Err(EvalError::ControlFlow(ControlFlow::Yield))
             },
         }
         Ok(())

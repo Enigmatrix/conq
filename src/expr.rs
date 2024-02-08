@@ -80,4 +80,6 @@ pub enum Expr {
         r#fn: Box<Expr>,
         args: Vec<Expr>,
     },
+    Launch(Box<Expr>),
+    Yield,
 }
