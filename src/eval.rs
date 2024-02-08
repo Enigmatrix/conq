@@ -172,6 +172,9 @@ impl Evaluator {
                 }
                 Expr::Body(exprs) => {
                     self.env.extend();
+                    if exprs.len() == 0 {
+                        self.control.push(Control::Expr(Expr::Literal(Value::Void)))
+                    } else {
                     exprs.into_iter().rev().enumerate().for_each(|(idx, expr)| {
                         if idx != 0 {
                             self.control.push(Control::Instruction(Instruction::Pop))
@@ -179,7 +182,8 @@ impl Evaluator {
                             self.control.push(Control::Instruction(Instruction::PopEnv))
                         }
                         self.control.push(Control::Expr(expr))
-                    });
+                        })
+                    };
                 }
                 Expr::Break => self.control.push(Control::Instruction(Instruction::Break)),
                 Expr::Continue => self
