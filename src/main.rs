@@ -4,6 +4,7 @@
  */
 
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct Ident(String);
@@ -100,28 +101,32 @@ enum Expr {
     },
 }
 
+#[derive(Clone)]
 struct Frame {
-    inner: HashMap<Ident, Value>,
+    inner: Arc<RwLock<HashMap<Ident, Value>>>,
 }
 
 impl Frame {
     fn new() -> Frame {
         Frame {
-            inner: HashMap::new(),
+            inner: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    fn lookup(&self, ident: &Ident) -> Option<&Value> {
-        self.inner.get(ident)
+    fn lookup(&self, ident: &Ident) -> Option<Value> {
+        let inner = self.inner.read().expect("poisoned lookup");
+        inner.get(ident).cloned()
     }
 
     // there should be a cleaner way to do this...
-    fn assign(&mut self, ident: Ident, val: Value) -> &Value {
-        self.inner.insert(ident.clone(), val);
-        self.inner.get(&ident).unwrap()
+    fn assign(&mut self, ident: Ident, val: Value) -> Value {
+        let mut inner = self.inner.write().expect("poisoned assign");
+        inner.insert(ident.clone(), val.clone());
+        val
     }
 }
 
+#[derive(Clone)]
 struct Environment {
     frames: Vec<Frame>,
 }
@@ -138,7 +143,6 @@ impl Environment {
             .iter()
             .rev()
             .fold(None, |v, frame| v.or_else(|| frame.lookup(ident)))
-            .cloned()
     }
 
     fn declare(&mut self, ident: Ident, val: Value) -> Value {
@@ -146,7 +150,6 @@ impl Environment {
             .last_mut()
             .expect("global frame not found") // literally not possible to occur
             .assign(ident, val)
-            .clone()
     }
 
     fn assign(&mut self, ident: Ident, val: Value) -> Result<Value, EvalError> {
@@ -157,7 +160,7 @@ impl Environment {
             .skip_while(|frame| frame.lookup(&ident).is_none())
             .next();
         if let Some(decl_frame) = decl_frame {
-            Ok(decl_frame.assign(ident, val).clone())
+            Ok(decl_frame.assign(ident, val))
         } else {
             Err(EvalError::IdentNotFound { ident })
         }
