@@ -6,6 +6,7 @@ pub enum ArithInfixOp {
     Sub,
     Mul,
     Div,
+    Mod,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

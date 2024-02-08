@@ -252,6 +252,7 @@ fn eval_infix(op: InfixOp, lhs: Value, rhs: Value) -> Result<Value, EvalError> {
                 ArithInfixOp::Sub => lhs - rhs,
                 ArithInfixOp::Mul => lhs * rhs,
                 ArithInfixOp::Div => lhs / rhs,
+                ArithInfixOp::Mod => lhs % rhs,
             }))
         }
         InfixOp::Compare(cmp) => {
