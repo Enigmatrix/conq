@@ -21,9 +21,4 @@ pub enum EvalError {
     IdentNotFound {
         ident: Ident,
     },
-    UnableToApply {
-        value: Value,
-    },
-    EmptyStack,
-    EmptyControl,
 }

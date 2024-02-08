@@ -1,5 +1,5 @@
 use crate::env::Environment;
-use crate::err::EvalError;
+use crate::err::{EvalError, Type};
 use crate::expr::{ArithInfixOp, CompareInfixOp, Expr, InfixOp, LogicalInfixOp, UnaryOp};
 use crate::instr::Instruction;
 use crate::val::Value;
@@ -109,7 +109,7 @@ impl Evaluator {
                         self.control.push(Control::Instruction(Instruction::Mark));
                         self.control.push(Control::Expr(*expr));
                     } else {
-                        return Err(EvalError::UnableToApply { value: r#fn });
+                        return Err(EvalError::TypeError { expected: Type::Fn, actual: r#fn });
                     }
                 }
                 Instruction::Mark => self.env.pop(),
