@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use crate::{
     env::Environment,
     eval::Evaluator,
     expr::{ArithInfixOp, CompareInfixOp, Expr, InfixOp},
-    val::{Ident, Value},
+    val::{Ident, PredefinedFnImpl, Value},
 };
 
 mod env;
@@ -14,6 +16,15 @@ mod val;
 
 fn main() {
     let mut env = Environment::new();
+    env.declare(
+        Ident("display".to_string()),
+        Value::PredefinedFn {
+            r#impl: PredefinedFnImpl::new(Arc::new(|args| {
+                println!("{:?}", args);
+                Ok(Value::Void)
+            })),
+        },
+    );
 
     let fib = Expr::Fn {
         name: Ident("fib".to_string()),
@@ -82,6 +93,13 @@ fn main() {
                     rhs: Box::new(Expr::Literal(Value::Int(0))),
                 }),
                 body: Box::new(Expr::Body(vec![
+                    Expr::Apply {
+                        r#fn: Box::new(Expr::Ident(Ident("display".to_string()))),
+                        args: vec![
+                            Expr::Ident(Ident("a".to_string())),
+                            Expr::Ident(Ident("b".to_string())),
+                        ],
+                    },
                     Expr::Let {
                         name: Ident("c".to_string()),
                         expr: Box::new(Expr::Infix {
@@ -139,7 +157,7 @@ fn main() {
         fib_iter,
         identity,
         Expr::Apply {
-            r#fn: Box::new(Expr::Ident(Ident("fib".to_string()))),
+            r#fn: Box::new(Expr::Ident(Ident("fib_iter".to_string()))),
             //r#fn: Box::new(Expr::Ident(Ident("identity".to_string()))),
             args: vec![Expr::Literal(Value::Int(19))],
         },

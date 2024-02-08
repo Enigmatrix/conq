@@ -1,3 +1,6 @@
+use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::sync::Arc;
+
 use crate::err::{EvalError, Type};
 use crate::expr::Expr;
 
@@ -12,7 +15,35 @@ pub enum Value {
     Int(i64),
     // String(String),
     Fn { params: Vec<Ident>, expr: Box<Expr> },
+    PredefinedFn { r#impl: PredefinedFnImpl },
 }
+
+#[derive(Clone)]
+pub struct PredefinedFnImpl(Arc<dyn Fn(Vec<Value>) -> Result<Value, EvalError>>);
+
+impl PredefinedFnImpl {
+    pub fn new(inner: Arc<dyn Fn(Vec<Value>) -> Result<Value, EvalError>>) -> Self {
+        PredefinedFnImpl(inner)
+    }
+
+    pub fn call(&self, args: Vec<Value>) -> Result<Value, EvalError> {
+        self.0(args)
+    }
+}
+
+impl Debug for PredefinedFnImpl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str("[predifined impl]")
+    }
+}
+
+impl PartialEq for PredefinedFnImpl {
+    fn eq(&self, other: &Self) -> bool {
+        false
+    }
+}
+
+impl Eq for PredefinedFnImpl {}
 
 impl Value {
     pub fn to_bool(&self) -> Result<bool, EvalError> {

@@ -98,18 +98,21 @@ impl Evaluator {
                             });
                         }
                         self.env.extend();
-                        params
-                            .into_iter()
-                            .map(|ident| -> Result<(), EvalError> {
-                                let arg = self.pop_stack();
-                                self.env.declare(ident, arg);
-                                Ok(())
-                            })
-                            .collect::<Result<_, _>>()?;
+                        params.into_iter().rev().for_each(|ident| {
+                            let arg = self.pop_stack();
+                            self.env.declare(ident, arg);
+                        });
                         self.control.push(Control::Instruction(Instruction::Mark));
                         self.control.push(Control::Expr(*expr));
+                    } else if let Value::PredefinedFn { r#impl } = r#fn {
+                        let mut args = (0..nargs).map(|_| self.pop_stack()).collect::<Vec<_>>();
+                        args.reverse();
+                        self.stack.push(r#impl.call(args)?)
                     } else {
-                        return Err(EvalError::TypeError { expected: Type::Fn, actual: r#fn });
+                        return Err(EvalError::TypeError {
+                            expected: Type::Fn,
+                            actual: r#fn,
+                        });
                     }
                 }
                 Instruction::Mark => self.env.pop(),
