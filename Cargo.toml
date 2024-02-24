@@ -1,2 +1,6 @@
 [workspace]
-members=["conqiler"]
+resolver="2"
+members=[
+  "conqiler",
+  "conq-er"
+]
