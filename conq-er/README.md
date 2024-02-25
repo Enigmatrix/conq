@@ -2,7 +2,7 @@
 
 # conq-er
 
-conq-er is a web-based IDE for the [Conq programming language](https://github.com/Enigmatrix/conq).
+conq-er is a web-based IDE for the [conq programming language](https://github.com/Enigmatrix/conq).
 
 ## Features
 
