@@ -1,26 +1,36 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
-use gloo_console::log;
+use std::rc::Rc;
+
 // use gloo_console::log;
 use stylist::yew::{styled_component, Global};
 use web_sys::HtmlElement;
 use yew::prelude::*;
 use yew_autoprops::autoprops;
 
-// mod utils;
+use monaco::{
+    api::CodeEditorOptions,
+    sys::editor::BuiltinTheme,
+    yew::CodeEditor,
+};
 
 const MIN_WIDTH: f64 = 200.0;
 
+const CONTENT: &str = include_str!("main.rs");
+
+fn get_options() -> CodeEditorOptions {
+    CodeEditorOptions::default()
+        .with_language("rust".to_owned())
+        .with_value(CONTENT.to_owned())
+        .with_builtin_theme(BuiltinTheme::VsDark)
+        .with_automatic_layout(true)
+}
+
 #[styled_component]
 pub fn Editor() -> Html {
+    let options = Rc::new(get_options());
     html! {
-        <div class={css!(r#"
-            background: #1e1e1e;
-            padding: 15px;
-            box-sizing: border-box;
-            color: #d4d4d4;
-            height: 100%;
-        "#)}/>
+        <CodeEditor classes={"full-height"} options={ options.to_sys_options() } />
     }
 }
 
@@ -143,7 +153,6 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
                         }
                     }
                     left_width.set(Some(new_width));
-                    log!("new_width", new_width);
                 }
             }
         })
@@ -197,7 +206,7 @@ pub fn App() -> Html {
                     }
                 "#)} />
             <SplitPane
-                left={html!{<Editor />}}
+                left={html!{<Editor />} }
                 right={html!{<Output />}}
             />
         </>

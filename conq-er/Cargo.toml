@@ -9,6 +9,8 @@ edition = "2021"
 yew = { version = "0.21.0", features = ["csr"] }
 yew-autoprops = "0.4.1"
 wasm-bindgen = "0.2.91"
+monaco = { git = "https://github.com/siku2/rust-monaco.git", features = ["yew-components"] }
+# ^ swap this once 0.5.0 is released
 stylist = { features = ["yew_integration"] }
 web-sys = { version = "0.3", features = ["HtmlElement", "CssStyleDeclaration"] }
 gloo-console = "0.3.0"
