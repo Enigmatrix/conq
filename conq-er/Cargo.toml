@@ -7,6 +7,8 @@ edition = "2021"
 
 [dependencies]
 yew = { version = "0.21.0", features = ["csr"] }
+yew-autoprops = "0.4.1"
+wasm-bindgen = "0.2.91"
 stylist = { features = ["yew_integration"] }
 web-sys = { version = "0.3", features = ["HtmlElement", "CssStyleDeclaration"] }
 gloo-console = "0.3.0"
