@@ -2,9 +2,8 @@
 
 use std::rc::Rc;
 
-// use gloo_console::log;
 use gloo::utils::window;
-use gloo::{console::log, events::EventListener};
+use gloo::{/* console::log, */events::EventListener};
 use stylist::yew::{styled_component, Global};
 use web_sys::HtmlElement;
 use yew::prelude::*;
@@ -33,7 +32,6 @@ fn get_options() -> CodeEditorOptions {
 #[styled_component]
 pub fn Editor() -> Html {
     let options = Rc::new(get_options());
-    let axis = use_context::<SplitAxis>().expect("No SplitAxis context found");
     html! {
         <CodeEditor classes={"full"} options={ options.to_sys_options() } />
     }
@@ -41,7 +39,6 @@ pub fn Editor() -> Html {
 
 #[styled_component]
 pub fn Output() -> Html {
-    let axis = use_context::<SplitAxis>().expect("No SplitAxis context found");
     html! {
         <div class={css!(r#"
             background: #222;
