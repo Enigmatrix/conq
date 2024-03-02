@@ -1,13 +1,15 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
 use gloo_console::log;
+// use gloo_console::log;
 use stylist::yew::{styled_component, Global};
-use wasm_bindgen::{closure::Closure, JsCast};
-use web_sys::{console::log, HtmlElement};
+use web_sys::HtmlElement;
 use yew::prelude::*;
 use yew_autoprops::autoprops;
 
 // mod utils;
+
+const MIN_WIDTH: f64 = 200.0;
 
 #[styled_component]
 pub fn Editor() -> Html {
@@ -37,14 +39,21 @@ pub fn Output() -> Html {
 
 #[autoprops]
 #[styled_component]
-pub fn Divider(on_mouse_down: Callback<web_sys::MouseEvent>) -> Html {
+pub fn Divider(on_mouse_down: Callback<PointerEvent>) -> Html {
     html! {
         <div class={css!(r#"
-            background: #888;
-            width: 5px;
+            cursor: col-resize;
+            padding: 0 1rem;
+            margin: 0 -1rem;
         "#)}
-            onmousedown={on_mouse_down}
-        />
+            onpointerdown={on_mouse_down.clone()}
+        >
+            <div class={css!(r#"
+                width: 5px;
+                background: #888;
+                height: 100%;
+            "#)} />
+        </div>
     }
 }
 
@@ -62,23 +71,20 @@ pub fn LeftPane(
         let set_left_width = set_left_width.clone();
         let left_ref = left_ref.clone();
 
-        use_effect_with(
-            (left_ref.clone(), left_width, set_left_width.clone()),
-            move |_| {
-                if let Some(left_div) = left_ref.cast::<HtmlElement>() {
-                    if left_width.is_none() {
-                        set_left_width.emit(left_div.client_width() as f64);
-                        left_div.style().set_property("flex", "0 0 auto").unwrap();
-                    } else {
-                        left_div
-                            .style()
-                            .set_property("width", &format!("{}px", left_width.unwrap()))
-                            .unwrap();
-                    }
+        use_effect_with(left_width.clone(), move |_| {
+            if let Some(left_div) = left_ref.cast::<HtmlElement>() {
+                if left_width.is_none() {
+                    set_left_width.emit(left_div.client_width() as f64);
+                    left_div.style().set_property("flex", "0 0 auto").unwrap();
+                } else {
+                    left_div
+                        .style()
+                        .set_property("width", &format!("{}px", left_width.unwrap()))
+                        .unwrap();
                 }
-                || {}
-            },
-        );
+            }
+            || {}
+        });
     }
 
     html! {
@@ -97,6 +103,8 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
     let divider_x = use_state(|| None);
     let is_dragging = use_state(|| false);
 
+    let split_pane_ref = use_node_ref();
+
     let set_left_width = {
         let left_width = left_width.clone();
         Callback::from(move |value: f64| {
@@ -107,10 +115,8 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
     let on_mouse_down = {
         let divider_x = divider_x.clone();
         let is_dragging = is_dragging.clone();
-        Callback::from(move |event: web_sys::MouseEvent| {
-            event.prevent_default();
+        Callback::from(move |event: PointerEvent| {
             divider_x.set(Some(event.client_x() as f64));
-            log!("down");
             is_dragging.set(true);
         })
     };
@@ -119,16 +125,25 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
         let left_width = left_width.clone();
         let divider_x = divider_x.clone();
         let is_dragging = is_dragging.clone();
-        let set_left_width = set_left_width.clone();
-        Callback::from(move |event: web_sys::MouseEvent| {
-            log!(*is_dragging);
+        let split_pane_ref = split_pane_ref.clone();
+        Callback::from(move |event: PointerEvent| {
             if *is_dragging {
-                if divider_x.is_some() {
-                    if let Some(left_width) = *left_width {
-                        set_left_width
-                            .emit(left_width + event.client_x() as f64 - divider_x.unwrap());
-                        divider_x.set(Some(event.client_x() as f64));
+                if left_width.is_some() {
+                    let new_width =
+                        left_width.unwrap() + (event.client_x() as f64 - divider_x.unwrap());
+                    divider_x.set(Some(event.client_x() as f64));
+                    if new_width < MIN_WIDTH {
+                        left_width.set(Some(MIN_WIDTH));
+                        return;
                     }
+                    if let Some(left_div) = split_pane_ref.cast::<HtmlElement>() {
+                        if new_width > (left_div.client_width() as f64) - MIN_WIDTH {
+                            left_width.set(Some(left_div.client_width() as f64 - MIN_WIDTH));
+                            return;
+                        }
+                    }
+                    left_width.set(Some(new_width));
+                    log!("new_width", new_width);
                 }
             }
         })
@@ -141,30 +156,6 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
         })
     };
 
-    {
-        let on_mouse_move = on_mouse_move.clone();
-        let on_mouse_up = on_mouse_up.clone();
-        use_effect_with((), move |_| {
-            let window = web_sys::window().unwrap();
-            let closure = Closure::wrap(Box::new(move |event: web_sys::MouseEvent| {
-                on_mouse_move.emit(event);
-            }) as Box<dyn FnMut(web_sys::MouseEvent)>);
-            let closure_move_ref = closure.as_ref();
-            window
-                .add_event_listener_with_callback("mousemove", closure_move_ref.unchecked_ref())
-                .unwrap();
-            closure.forget();
-            let closure = Closure::wrap(Box::new(move |event: web_sys::MouseEvent| {
-                on_mouse_up.emit(event);
-            }) as Box<dyn FnMut(web_sys::MouseEvent)>);
-            let closure_up_ref = closure.as_ref();
-            window
-                .add_event_listener_with_callback("mouseup", closure_up_ref.unchecked_ref())
-                .unwrap();
-            closure.forget();
-        });
-    }
-
     html! {
         <div class={css!(r#"
             display: flex;
@@ -172,7 +163,12 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
             height: 100%;
             width: 100%;
             align-items: stretch;
-        "#)}>
+        "#)}
+            onpointermove={on_mouse_move.clone()}
+            onpointerup={on_mouse_up.clone()}
+            onpointerleave={on_mouse_up.clone()}
+            ref={split_pane_ref.clone()}
+        >
             <LeftPane
                 left_width={&*left_width}
                 set_left_width={set_left_width.clone()}
