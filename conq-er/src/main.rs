@@ -60,6 +60,7 @@ pub fn LeftPane(props: &LeftPaneProps) -> Html {
             if let Some(left_div) = left_ref.cast::<HtmlElement>() {
                 if left_width.is_none() {
                     set_left_width.emit(left_div.client_width() as f64);
+                    left_div.style().set_property("flex", "0 0 auto").unwrap();
                 } else {
                     left_div.style().set_property("width", &format!("{}px", left_width.unwrap())).unwrap();
                 }
@@ -88,7 +89,6 @@ pub fn SplitPane(props: &SplitPaneProps) -> Html {
 
     let _left_width = left_width.clone();
     let slw = Callback::from(move |value: f64| {
-        log!("Setting left width to {}", value);
         _left_width.set(Some(value));
     });
 
