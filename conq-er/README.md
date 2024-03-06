@@ -17,9 +17,10 @@ Requires [Rust](https://www.rust-lang.org/) and [Trunk](https://trunkrs.dev/).
 
 To get started with Conq-er, follow these steps:
 
-1. Clone this repository: `git clone https://github.com/nafeij/conq-er.git`
-2. Install the necessary dependencies: `cargo build`
-3. Run the server: `trunk serve --open`
+1. Clone this repository: `git clone https://github.com/Enigmatrix/conq/`
+2. Navigate to the top-level project directory: `cd conq`
+3. Install the necessary dependencies: `cargo build`
+4. Run the server: `trunk serve --open conq-er/index.html`
 
 ## License
 
