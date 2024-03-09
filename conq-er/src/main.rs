@@ -3,9 +3,8 @@
 use std::rc::Rc;
 
 use gloo::utils::window;
-use gloo::{console::log, events::EventListener};
+use gloo::{/* console::log, */ events::EventListener};
 use stylist::yew::{styled_component, Global};
-use web_sys::console::log;
 use web_sys::HtmlElement;
 use yew::prelude::*;
 use yew_autoprops::autoprops;
@@ -132,7 +131,7 @@ pub fn LeftPane(
     }
 
     html! {
-        <div ref={left_ref.clone()}>
+        <div style="flex: 1;" ref={left_ref.clone()}>
             {children.clone()}
         </div>
     }
@@ -246,7 +245,6 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
                     };
                     let new_width = (*left_frac * parent_len as f64) as i32;
                     left_width.set(Some(new_width));
-                    log!("test", new_width);
                 }
             })
             .forget();
