@@ -9,6 +9,8 @@ use melior::{
     Context,
 };
 
+mod ast;
+
 fn main() {
     let registry = DialectRegistry::new();
     register_all_dialects(&registry);
@@ -48,4 +50,6 @@ fn main() {
     ));
 
     assert!(module.as_operation().verify());
+    let llir = module.as_operation().to_string();
+    println!("{}", llir);
 }
