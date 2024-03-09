@@ -1,7 +1,7 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
-use gloo::utils::window;
-use gloo::{/* console::log, */ events::EventListener};
+use gloo;
+use gloo::{utils::window, events::EventListener, console::log };
 use stylist::yew::{styled_component, Global};
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::HtmlElement;
@@ -14,6 +14,9 @@ use monaco::{
     yew::{CodeEditor, CodeEditorLink},
 };
 
+mod execute;
+use execute::execute;
+
 #[derive(Clone, PartialEq)]
 enum SplitAxis {
     Horizontal,
@@ -22,7 +25,7 @@ enum SplitAxis {
 
 const MIN_AXIS: i32 = 200;
 
-const CONTENT: &str = include_str!("../static/main.rs");
+const CONTENT: &str = include_str!("../static/init.rs");
 
 fn get_options() -> CodeEditorOptions {
     CodeEditorOptions::default()
@@ -50,8 +53,9 @@ pub fn Editor(props: &EditorProps) -> Html {
     }
 }
 
+#[autoprops]
 #[styled_component]
-pub fn Output() -> Html {
+pub fn Output(children: &Children) -> Html {
     html! {
         <div class={css!(r#"
             background: #222;
@@ -61,7 +65,7 @@ pub fn Output() -> Html {
             height: 100%;
             width: 100%;
         "#)}>
-            <pre>{"test out please ignore"}</pre>
+            <pre>{children.clone()}</pre>
         </div>
     }
 }
@@ -97,7 +101,7 @@ pub fn Divider(on_mouse_down: Callback<PointerEvent>) -> Html {
 #[function_component]
 pub fn LeftPane(
     left_width: Option<i32>,
-    set_left_width: Callback<i32>,
+    init_left_width: Callback<i32>,
     children: &Children,
 ) -> Html {
     let left_ref = use_node_ref();
@@ -105,13 +109,13 @@ pub fn LeftPane(
 
     {
         let left_width = left_width.clone();
-        let set_left_width = set_left_width.clone();
+        let init_left_width = init_left_width.clone();
         let left_ref = left_ref.clone();
 
         use_effect_with((left_width.clone(), axis.clone()), move |_| {
             if let Some(left_div) = left_ref.cast::<HtmlElement>() {
                 if left_width.is_none() {
-                    set_left_width.emit(match axis {
+                    init_left_width.emit(match axis {
                         SplitAxis::Horizontal => left_div.client_width(),
                         SplitAxis::Vertical => left_div.client_height(),
                     });
@@ -161,10 +165,28 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
 
     let split_pane_ref = use_node_ref();
 
-    let set_left_width = {
+    let sync_split_axis = {
+        let axis_ctx = axis_ctx.clone();
+        move || {
+            let new_axis;
+            if window().inner_width().unwrap().as_f64().unwrap()
+                < window().inner_height().unwrap().as_f64().unwrap()
+            {
+                new_axis = SplitAxis::Vertical;
+            } else {
+                new_axis = SplitAxis::Horizontal;
+            }
+            axis_ctx.set(new_axis.clone());
+            new_axis
+        }
+    };
+
+    let init_left_width = {
         let left_width = left_width.clone();
+        let sync_split_axis = sync_split_axis.clone();
         Callback::from(move |value: i32| {
             left_width.set(Some(value));
+            sync_split_axis();
         })
     };
 
@@ -240,17 +262,12 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
         let left_frac = left_frac.clone();
         let left_width = left_width.clone();
         let split_pane_ref = split_pane_ref.clone();
+        let sync_split_axis = sync_split_axis.clone();
         move |_| {
             EventListener::new(&window(), "resize", move |_| {
-                let new_axis;
-                if window().inner_width().unwrap().as_f64().unwrap()
-                    < window().inner_height().unwrap().as_f64().unwrap()
-                {
-                    new_axis = SplitAxis::Vertical;
-                } else {
-                    new_axis = SplitAxis::Horizontal;
-                }
+                let new_axis = sync_split_axis();
                 axis_ctx.set(new_axis.clone());
+
                 if let Some(split_pane_div) = split_pane_ref.cast::<HtmlElement>() {
                     let parent_len = match new_axis {
                         SplitAxis::Horizontal => split_pane_div.client_width(),
@@ -284,7 +301,7 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
         >
             <LeftPane
                 left_width={&*left_width}
-                set_left_width={set_left_width.clone()}
+                init_left_width={init_left_width.clone()}
             >
                 {left.clone()}
             </LeftPane>
@@ -299,7 +316,7 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
 
 #[styled_component]
 pub fn App() -> Html {
-    let text_model = TextModel::create(CONTENT, Some("rust"), None).unwrap();
+    let text_model = use_state_eq(|| TextModel::create(CONTENT, Some("rust"), None).unwrap());
     let out = use_state_eq(|| String::from(CONTENT));
 
     // https://github.com/siku2/rust-monaco/blob/main/examples/yew_events_keymapping/src/main.rs
@@ -315,7 +332,11 @@ pub fn App() -> Html {
             // We update the code state when the Monaco model changes.
             // See https://yew.rs/docs/0.20.0/concepts/function-components/pre-defined-hooks
             Closure::<dyn Fn()>::new(move || {
-                out.set(text_model.get_value());
+                let res = execute(text_model.get_value());
+                match res {
+                    Ok(output) => out.set(output),
+                    Err(e) => log!("Error: ", e.to_string()),
+                }
             })
         };
 
@@ -351,12 +372,12 @@ pub fn App() -> Html {
                     }
                 "#)} />
             <SplitPane
-                left={html!{<Editor {on_editor_created} text_model={text_model.clone()} />} }
+                left={html!{<Editor {on_editor_created} text_model={(*text_model).clone()} />} }
                 right={html!{
-                    <>
-                        <h2>{"Code (press CTRL+Enter / Command+Enter to view)"}</h2>
-                        <Output />
-                    </>
+                    <Output>
+                        <p style="color:#888;">{"Press CTRL+Enter / Command+Enter to run\n\n"}</p>
+                        {out.to_string()}
+                    </Output>
                 }}
             />
         </>
