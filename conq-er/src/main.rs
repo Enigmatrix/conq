@@ -1,15 +1,18 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
-use std::rc::Rc;
-
 use gloo::utils::window;
 use gloo::{/* console::log, */ events::EventListener};
 use stylist::yew::{styled_component, Global};
+use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::HtmlElement;
 use yew::prelude::*;
 use yew_autoprops::autoprops;
 
-use monaco::{api::CodeEditorOptions, sys::editor::BuiltinTheme, yew::CodeEditor};
+use monaco::{
+    api::{CodeEditorOptions, TextModel},
+    sys::editor::{BuiltinTheme, IStandaloneCodeEditor},
+    yew::{CodeEditor, CodeEditorLink},
+};
 
 #[derive(Clone, PartialEq)]
 enum SplitAxis {
@@ -29,11 +32,21 @@ fn get_options() -> CodeEditorOptions {
         .with_automatic_layout(true)
 }
 
-#[styled_component]
-pub fn Editor() -> Html {
-    let options = Rc::new(get_options());
+#[derive(PartialEq, Properties)]
+pub struct EditorProps {
+    on_editor_created: Callback<CodeEditorLink>,
+    text_model: TextModel,
+}
+
+#[function_component]
+pub fn Editor(props: &EditorProps) -> Html {
+    let EditorProps {
+        on_editor_created,
+        text_model,
+    } = props;
+
     html! {
-        <CodeEditor classes={"full"} options={ options.to_sys_options() } />
+        <CodeEditor classes={"full"} options={ get_options().to_sys_options() } {on_editor_created} model={text_model.clone()} />
     }
 }
 
@@ -286,6 +299,46 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
 
 #[styled_component]
 pub fn App() -> Html {
+    let text_model = TextModel::create(CONTENT, Some("rust"), None).unwrap();
+    let out = use_state_eq(|| String::from(CONTENT));
+
+    // https://github.com/siku2/rust-monaco/blob/main/examples/yew_events_keymapping/src/main.rs
+    let on_editor_created = {
+        // We need to clone the text_model/code so we can use them.
+        let text_model = text_model.clone();
+        let out = out.clone();
+
+        // This is a javascript closure, used to pass to Monaco, using wasm-bindgen.
+        let js_closure = {
+            let text_model = text_model.clone();
+
+            // We update the code state when the Monaco model changes.
+            // See https://yew.rs/docs/0.20.0/concepts/function-components/pre-defined-hooks
+            Closure::<dyn Fn()>::new(move || {
+                out.set(text_model.get_value());
+            })
+        };
+
+        // Here we define our callback, we use use_callback as we want to re-render when dependencies change.
+        // See https://yew.rs/docs/concepts/function-components/state#general-view-of-how-to-store-state
+        use_callback(
+            text_model,
+            move |editor_link: CodeEditorLink, _text_model| {
+                editor_link.with_editor(|editor| {
+                    // Registers Ctrl/Cmd + Enter hotkey
+                    let keycode = monaco::sys::KeyCode::Enter.to_value()
+                        | (monaco::sys::KeyMod::ctrl_cmd() as u32);
+                    let raw_editor: &IStandaloneCodeEditor = editor.as_ref();
+
+                    raw_editor.add_command(
+                        keycode.into(),
+                        js_closure.as_ref().unchecked_ref(),
+                        None,
+                    );
+                });
+            },
+        )
+    };
     html! {
         <>
             // Global Styles can be applied with <Global /> component.
@@ -298,8 +351,13 @@ pub fn App() -> Html {
                     }
                 "#)} />
             <SplitPane
-                left={html!{<Editor />} }
-                right={html!{<Output />}}
+                left={html!{<Editor {on_editor_created} text_model={text_model.clone()} />} }
+                right={html!{
+                    <>
+                        <h2>{"Code (press CTRL+Enter / Command+Enter to view)"}</h2>
+                        <Output />
+                    </>
+                }}
             />
         </>
     }
