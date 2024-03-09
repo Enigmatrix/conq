@@ -3,8 +3,9 @@
 use std::rc::Rc;
 
 use gloo::utils::window;
-use gloo::{/* console::log, */events::EventListener};
+use gloo::{console::log, events::EventListener};
 use stylist::yew::{styled_component, Global};
+use web_sys::console::log;
 use web_sys::HtmlElement;
 use yew::prelude::*;
 use yew_autoprops::autoprops;
@@ -19,7 +20,7 @@ enum SplitAxis {
 
 const MIN_AXIS: i32 = 200;
 
-const CONTENT: &str = include_str!("main.rs");
+const CONTENT: &str = include_str!("../static/main.rs");
 
 fn get_options() -> CodeEditorOptions {
     CodeEditorOptions::default()
@@ -95,10 +96,9 @@ pub fn LeftPane(
         let set_left_width = set_left_width.clone();
         let left_ref = left_ref.clone();
 
-        use_effect_with(left_width.clone(), move |_| {
+        use_effect_with((left_width.clone(), axis.clone()), move |_| {
             if let Some(left_div) = left_ref.cast::<HtmlElement>() {
                 if left_width.is_none() {
-                    left_div.style().set_property("flex", "1").unwrap();
                     set_left_width.emit(match axis {
                         SplitAxis::Horizontal => left_div.client_width(),
                         SplitAxis::Vertical => left_div.client_height(),
@@ -107,18 +107,24 @@ pub fn LeftPane(
                 } else {
                     left_div
                         .style()
-                        .set_property( match axis {
-                            SplitAxis::Horizontal => "width",
-                            SplitAxis::Vertical => "height",
-                        }, &format!("{}px", left_width.unwrap()))
+                        .set_property(
+                            match axis {
+                                SplitAxis::Horizontal => "width",
+                                SplitAxis::Vertical => "height",
+                            },
+                            &format!("{}px", left_width.unwrap()),
+                        )
                         .unwrap();
-                    left_div.style().set_property(
-                        match axis {
-                            SplitAxis::Horizontal => "height",
-                            SplitAxis::Vertical => "width",
-                        },
-                        "unset",
-                    ).unwrap();
+                    left_div
+                        .style()
+                        .set_property(
+                            match axis {
+                                SplitAxis::Horizontal => "height",
+                                SplitAxis::Vertical => "width",
+                            },
+                            "unset",
+                        )
+                        .unwrap();
                 }
             }
             || {}
@@ -136,6 +142,7 @@ pub fn LeftPane(
 #[styled_component]
 pub fn SplitPane(left: &Html, right: &Html) -> Html {
     let left_width = use_state_eq(|| None);
+    let left_frac = use_state_eq(|| 0.5);
     let divider_x = use_state_eq(|| None);
     let is_dragging = use_state_eq(|| false);
     let axis_ctx = use_state_eq(|| SplitAxis::Horizontal);
@@ -165,23 +172,25 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
 
     let set_width_bounded = {
         let left_width = left_width.clone();
+        let left_frac = left_frac.clone();
         let split_pane_ref = split_pane_ref.clone();
         let axis_ctx = axis_ctx.clone();
         Callback::from(move |value: i32| {
-            if value < MIN_AXIS {
-                left_width.set(Some(MIN_AXIS));
-                return;
-            }
-            if let Some(left_div) = split_pane_ref.cast::<HtmlElement>() {
+            if let Some(split_pane_div) = split_pane_ref.cast::<HtmlElement>() {
+                let new_width;
                 let parent_len = match *axis_ctx {
-                    SplitAxis::Horizontal => left_div.client_width(),
-                    SplitAxis::Vertical => left_div.client_height(),
+                    SplitAxis::Horizontal => split_pane_div.client_width(),
+                    SplitAxis::Vertical => split_pane_div.client_height(),
                 };
-                if value > parent_len - MIN_AXIS {
-                    left_width.set(Some(parent_len - MIN_AXIS));
+                if value < MIN_AXIS {
+                    new_width = MIN_AXIS;
+                } else if value > parent_len - MIN_AXIS {
+                    new_width = parent_len - MIN_AXIS;
                 } else {
-                    left_width.set(Some(value));
+                    new_width = value;
                 }
+                left_width.set(Some(new_width));
+                left_frac.set(new_width as f64 / parent_len as f64);
             }
         })
     };
@@ -190,7 +199,7 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
         let left_width = left_width.clone();
         let divider_x = divider_x.clone();
         let is_dragging = is_dragging.clone();
-        let set_with_bounded = set_width_bounded.clone();
+        let set_width_bounded = set_width_bounded.clone();
         let axis_ctx = axis_ctx.clone();
         Callback::from(move |event: PointerEvent| {
             if *is_dragging {
@@ -199,10 +208,9 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
                         SplitAxis::Horizontal => event.client_x(),
                         SplitAxis::Vertical => event.client_y(),
                     };
-                    let new_width =
-                        left_width.unwrap() + (drag_len - divider_x.unwrap());
+                    let new_width = left_width.unwrap() + (drag_len - divider_x.unwrap());
                     divider_x.set(Some(drag_len));
-                    set_with_bounded.emit(new_width);
+                    set_width_bounded.emit(new_width);
                 }
             }
         })
@@ -217,7 +225,9 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
 
     use_effect_with((), {
         let axis_ctx = axis_ctx.clone();
+        let left_frac = left_frac.clone();
         let left_width = left_width.clone();
+        let split_pane_ref = split_pane_ref.clone();
         move |_| {
             EventListener::new(&window(), "resize", move |_| {
                 let new_axis;
@@ -228,9 +238,18 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
                 } else {
                     new_axis = SplitAxis::Horizontal;
                 }
-                left_width.set(None);
-                axis_ctx.set(new_axis);
-            }).forget();
+                axis_ctx.set(new_axis.clone());
+                if let Some(split_pane_div) = split_pane_ref.cast::<HtmlElement>() {
+                    let parent_len = match new_axis {
+                        SplitAxis::Horizontal => split_pane_div.client_width(),
+                        SplitAxis::Vertical => split_pane_div.client_height(),
+                    };
+                    let new_width = (*left_frac * parent_len as f64) as i32;
+                    left_width.set(Some(new_width));
+                    log!("test", new_width);
+                }
+            })
+            .forget();
             || {}
         }
     });
