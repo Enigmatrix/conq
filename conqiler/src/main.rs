@@ -10,6 +10,7 @@ use melior::{
 };
 
 mod ast;
+mod parser;
 
 fn main() {
     let registry = DialectRegistry::new();
