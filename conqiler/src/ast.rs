@@ -53,7 +53,7 @@ pub enum Value {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Ident(String);
+pub struct Ident(pub String);
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {

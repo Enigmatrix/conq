@@ -2,7 +2,7 @@
 <unit> ::= "()"
 <int> ::= [0-9]+
 <bool> ::= "true" | "false"
-<string> ::= "\"" [a-z]*  "\"" // there’s probably a better way :)
+<string> ::= "\"" [^"\""]*  "\"" // there’s probably a better way :)
 <literal> ::= <int> | <bool> | <string>
 
 <unary_op> ::= "!" | "-"
