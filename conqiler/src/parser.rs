@@ -2,9 +2,31 @@ use chumsky::prelude::*;
 
 use crate::ast::*;
 
+
 pub fn parser() -> impl Parser<char, Expr, Error = Simple<char>> {
-    filter(|c: &char| c.is_ascii_digit())
-        .map(|c| Expr::Literal(Value::Int(c.to_digit(10).unwrap() as i64)))
+    // let int = text::int(10)
+    //     .map(|s: String| Expr::Literal(Value::Int(s.parse().unwrap())))
+    //     .padded();
+
+    // int.then_ignore(end())
+
+    let int = text::int(10)
+    .map(|s: String| Expr::Literal(Value::Int(s.parse().unwrap())))
+    .padded();
+
+    let atom = int;
+
+    let op = |c| just(c).padded();
+
+    let unary = op('-')
+        .repeated()
+        .then(atom)
+        .foldr(|_op, rhs| Expr::Unary {
+            op: UnaryOp::Neg,
+            expr: Box::new(rhs),
+        });
+
+    unary.then_ignore(end())
 }
 
 #[cfg(test)]
@@ -12,8 +34,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse() {
-        let src = "0";
-        assert_eq!(parser().parse(src), Ok(Expr::Literal(Value::Int(0))));
+    fn parse_int() {
+        assert_eq!(
+            parser().parse(" 505  "),
+            Ok(Expr::Literal(Value::Int(505)))
+        );
+    }
+
+    #[test]
+    fn parse_neg() {
+        assert_eq!(
+            parser().parse(" ---505  "),
+            Ok(Expr::Unary {
+                op: UnaryOp::Neg,
+                expr: Box::new(Expr::Unary {
+                    op: UnaryOp::Neg,
+                    expr: Box::new(Expr::Unary {
+                        op: UnaryOp::Neg,
+                        expr: Box::new(Expr::Literal(Value::Int(505))),
+                    }),
+                })
+            })
+        );
     }
 }
