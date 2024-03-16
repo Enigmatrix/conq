@@ -11,6 +11,8 @@
 <bin_op> ::= <arith_bin_op> | <log_bin_op>
 
 <cond> ::= "if" <expr> "{" <block> "}" ("else" "if " <expr> "{" <block> "}")* ("else" "{" <block> "}")?
+            | <expr> "?" <expr> ":" <expr>
+
 <while> ::= "while" <expr> "{" <block> "}"
 
 <ident> ::= [a-z]+ ; there’s probably a better way :)
@@ -20,19 +22,19 @@
 <fn_decl> ::= "fn" <ident> "(" <ident>* ")" "{" <block> "}"
 <apply> ::= <ident> "(" <expr>* ")"
 
+<block> ::= <stmt>* <expr>?
 <expr> ::= <literal>
            | <unary_op> <expr>
            | <expr> <bin_op> <expr>
            | <cond>
            | <assign>
            | <apply>
-           | <block>
+           | "{" <block> "}"
            | "(" <expr> ")"
-<block> ::= <stmt>* <expr>?
 <stmt> ::= <expr> ";"
-		 | <decl>
+            | <decl> ";"
             | <fn_decl>
-		 | "break" ";"
+            | "break" ";"
             | "continue" ";"
             | <while>
             | "return" <expr> ";"
