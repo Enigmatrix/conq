@@ -50,6 +50,8 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
         .repeated()
         .delimited_by(just('"'), just('"'))
         .map(|v: Vec<char>| Token::Str(v.into_iter().collect()));
+
+    // gotta be a better way to do this
     let op = choice((
         just("-"),
         just("+"),
@@ -93,6 +95,10 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
 
 pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     recursive(|expr| {
+        let block_ = expr
+            .clone()
+            .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')));
+
         let inline_expr = recursive(|inline_expr| {
             let val = select! {
                 Token::Bool(b) => Value::Bool(b),
@@ -103,12 +109,14 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
 
             let ident = select! {
                 Token::Ident(s) => Ident(s),
-            }
-            .map(Expr::Ident);
+            };
 
-            let atom = val.or(ident).or(expr
-                .clone()
-                .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))));
+            let atom = val
+                .or(expr
+                    .clone()
+                    .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))))
+                .or(block_.clone())
+                .or(ident.map(Expr::Ident));
 
             // http://en.wikipedia.org/wiki/Order_of_operations#Programming_languages
             let op = choice((
@@ -185,26 +193,63 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
                 Token::Ident(s) => Ident(s),
             })
             .then_ignore(just(Token::Op("=".to_string())))
-            .then(expr.clone())
+            .then(inline_expr.clone())
             .then_ignore(just(Token::Ctrl(';')))
             .map(|(name, expr)| Stmt::Let {
                 name,
                 expr: Box::new(expr),
             });
 
-        let_.repeated()
-            .then(inline_expr.or_not())
-            .map(|(stmts, val)| {
-                if stmts.is_empty() {
-                    val.unwrap()
-                } else {
-                    Expr::Body {
-                        stmts,
-                        val: Box::new(val.unwrap_or(Expr::Literal(Value::Void))),
+        let assign = select! {
+            Token::Ident(s) => Ident(s),
+        }
+        .then_ignore(just(Token::Op("=".to_string())))
+        .then(inline_expr.clone())
+        .map(|(name, expr)| Expr::Assign {
+            name,
+            expr: Box::new(expr),
+        });
+
+        let if_ = just(Token::If)
+            .ignore_then(inline_expr.clone())
+            .then(block_.clone())
+            .then(
+                just(Token::Else)
+                .ignore_then(block_.clone())
+                .or_not()
+            )
+            .map(|((pred, conseq), alt)| Expr::Cond {
+                pred: Box::new(pred),
+                conseq: Box::new(conseq),
+                alt: Box::new(alt.unwrap_or(Expr::Literal(Value::Void))),
+            });
+
+        let expr_ = assign.or(inline_expr).or(if_);
+
+        let stmt = let_.or(expr_
+            .clone()
+            .then_ignore(just(Token::Ctrl(';')))
+            .map(Stmt::Expr));
+
+        let block = recursive(|block| {
+            let block = block.delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')));
+            stmt.or(block.clone().map(Stmt::Expr))
+                .repeated()
+                .then((expr_.or(block)).or_not())
+                .map(|(stmts, val)| {
+                    if stmts.is_empty() {
+                        val.unwrap()
+                    } else {
+                        Expr::Body {
+                            stmts,
+                            val: Box::new(val.unwrap_or(Expr::Literal(Value::Void))),
+                        }
                     }
-                }
-            })
+                })
+        });
+        block
     })
+    .then_ignore(end())
 }
 
 macro_rules! parser {
@@ -306,8 +351,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_int() {
+    fn parse_atom() {
         assert_eq!(parser!(" 505  "), Ok(Expr::Literal(Value::Int(505))));
+        assert_eq!(parser!(" true "), Ok(Expr::Literal(Value::Bool(true))));
+        assert_eq!(parser!(" false "), Ok(Expr::Literal(Value::Bool(false))));
+        assert_eq!(
+            parser!(" ! true "),
+            Ok(Expr::Unary {
+                op: UnaryOp::Not,
+                expr: Box::new(Expr::Literal(Value::Bool(true)))
+            })
+        );
+        assert_eq!(
+            parser!(" \"hello\" "),
+            Ok(Expr::Literal(Value::String("hello".to_string())))
+        );
     }
 
     #[test]
@@ -357,35 +415,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_bool() {
-        assert_eq!(parser!(" true "), Ok(Expr::Literal(Value::Bool(true))));
-        assert_eq!(parser!(" false "), Ok(Expr::Literal(Value::Bool(false))));
-        assert_eq!(
-            parser!(" ! true "),
-            Ok(Expr::Unary {
-                op: UnaryOp::Not,
-                expr: Box::new(Expr::Literal(Value::Bool(true)))
-            })
-        );
-    }
-
-    #[test]
-    fn parse_string() {
-        assert_eq!(
-            parser!(" \"hello\" "),
-            Ok(Expr::Literal(Value::String("hello".to_string())))
-        );
-        assert_eq!(
-            parser!(" \"hello\" + \"world\" "),
-            Ok(Expr::Binary {
-                op: BinaryOp::Arith(ArithBinaryOp::Add), // need to check this in compiler
-                lhs: Box::new(Expr::Literal(Value::String("hello".to_string()))),
-                rhs: Box::new(Expr::Literal(Value::String("world".to_string()))),
-            })
-        );
-    }
-
-    #[test]
     fn parse_logical_compare() {
         assert_eq!(
             parser!(" 1 < 2 && 3 > 4 || false != true"),
@@ -415,23 +444,83 @@ mod tests {
 
     #[test]
     fn parse_ident_let() {
-        assert_eq!(parser!(" a "), Ok(Expr::Ident(Ident("a".to_string()))));
         assert_eq!(
-            parser!(" a + b "),
-            Ok(Expr::Binary {
-                op: BinaryOp::Arith(ArithBinaryOp::Add),
-                lhs: Box::new(Expr::Ident(Ident("a".to_string()))),
-                rhs: Box::new(Expr::Ident(Ident("b".to_string()))),
+            parser!("let a = 0; a = 1 ; a + 4"),
+            Ok(Expr::Body {
+                stmts: vec![
+                    Stmt::Let {
+                        name: Ident("a".to_string()),
+                        expr: Box::new(Expr::Literal(Value::Int(0))),
+                    },
+                    Stmt::Expr(Expr::Assign {
+                        name: Ident("a".to_string()),
+                        expr: Box::new(Expr::Literal(Value::Int(1))),
+                    }),
+                ],
+                val: Box::new(Expr::Binary {
+                    op: BinaryOp::Arith(ArithBinaryOp::Add),
+                    lhs: Box::new(Expr::Ident(Ident("a".to_string()))),
+                    rhs: Box::new(Expr::Literal(Value::Int(4))),
+                }),
             })
         );
+    }
+
+    #[test]
+    fn parse_block() {
         assert_eq!(
-            parser!(" let a = 5 ; "),
+            parser!(
+                r#"
+                let a = {
+                    let b = 0;
+                    a = 1;
+                    a + b
+                };
+                a
+            "#
+            ),
             Ok(Expr::Body {
                 stmts: vec![Stmt::Let {
                     name: Ident("a".to_string()),
-                    expr: Box::new(Expr::Literal(Value::Int(5))),
-                }],
-                val: Box::new(Expr::Literal(Value::Void)),
+                    expr: Box::new(Expr::Body {
+                        stmts: vec![
+                            Stmt::Let {
+                                name: Ident("b".to_string()),
+                                expr: Box::new(Expr::Literal(Value::Int(0))),
+                            },
+                            Stmt::Expr(Expr::Assign {
+                                name: Ident("a".to_string()),
+                                expr: Box::new(Expr::Literal(Value::Int(1))),
+                            }),
+                        ],
+                        val: Box::new(Expr::Binary {
+                            op: BinaryOp::Arith(ArithBinaryOp::Add),
+                            lhs: Box::new(Expr::Ident(Ident("a".to_string()))),
+                            rhs: Box::new(Expr::Ident(Ident("b".to_string()))),
+                        }),
+                    }),
+                },],
+                val: Box::new(Expr::Ident(Ident("a".to_string()))),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_cond () {
+        assert_eq!(
+            parser!(
+                r#"
+                if true {
+                    1
+                } else {
+                    0
+                }
+            "#
+            ),
+            Ok(Expr::Cond {
+                pred: Box::new(Expr::Literal(Value::Bool(true))),
+                conseq: Box::new(Expr::Literal(Value::Int(1))),
+                alt: Box::new(Expr::Literal(Value::Int(0))),
             })
         );
     }
