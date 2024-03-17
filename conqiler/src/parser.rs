@@ -12,7 +12,6 @@ pub enum Token {
     Ident(String),
     Fn,
     Let,
-    Print,
     If,
     Else,
     While,
@@ -20,28 +19,6 @@ pub enum Token {
     Break,
     Continue,
 }
-
-// impl<'src> fmt::Display for Token {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         match self {
-//             Token::Bool(x) => write!(f, "{}", x),
-//             Token::Num(n) => write!(f, "{}", n),
-//             Token::Str(s) => write!(f, "{}", s),
-//             Token::Op(s) => write!(f, "{}", s),
-//             Token::Ctrl(c) => write!(f, "{}", c),
-//             Token::Ident(s) => write!(f, "{}", s),
-//             Token::Fn => write!(f, "fn"),
-//             Token::Let => write!(f, "let"),
-//             Token::Print => write!(f, "print"),
-//             Token::If => write!(f, "if"),
-//             Token::Else => write!(f, "else"),
-//             Token::While => write!(f, "while"),
-//             Token::Return => write!(f, "return"),
-//             Token::Break => write!(f, "break"),
-//             Token::Continue => write!(f, "continue"),
-//         }
-//     }
-// }
 
 // One iterative pass to prevent keyword capture
 fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
@@ -53,30 +30,30 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
 
     // gotta be a better way to do this
     let op = choice((
+        just("=="),
+        just("!="),
+        just(">="),
+        just("<="),
+        just("&&"),
+        just("||"),
         just("-"),
         just("+"),
         just("*"),
         just("/"),
         just("%"),
         just("="),
-        just("=="),
-        just("!="),
-        just(">="),
-        just("<="),
         just(">"),
         just("<"),
-        just("&&"),
-        just("||"),
         just("!"),
     ))
     .map(|s: &str| Token::Op(s.to_string()));
+
     let ctrl = one_of("(){};,").map(Token::Ctrl);
     let ident = text::ident().map(|ident: String| match ident.as_str() {
         "true" => Token::Bool(true),
         "false" => Token::Bool(false),
         "fn" => Token::Fn,
         "let" => Token::Let,
-        "print" => Token::Print,
         "if" => Token::If,
         "else" => Token::Else,
         "while" => Token::While,
@@ -94,99 +71,115 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
 }
 
 pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
-    recursive(|expr| {
-        let ident = select! {
-            Token::Ident(s) => Ident(s),
-        };
+    let ident = select! {
+        Token::Ident(s) => Ident(s),
+    };
 
+    let val = select! {
+        Token::Bool(b) => Value::Bool(b),
+        Token::Num(n) => Value::Int(n),
+        Token::Str(s) => Value::String(s),
+    }
+    .map(Expr::Literal);
+
+    recursive(|expr| {
         let scoped_block = expr
             .clone()
             .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')));
 
-        let inline_expr = recursive(|inline_expr| {
-            let val = select! {
-                Token::Bool(b) => Value::Bool(b),
-                Token::Num(n) => Value::Int(n),
-                Token::Str(s) => Value::String(s),
-            }
-            .map(Expr::Literal);
+        let atom = val
+            .or(expr
+                .clone()
+                .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))))
+            .or(scoped_block.clone())
+            .or(ident.clone().map(Expr::Ident));
 
-            let atom = val
-                .or(expr
-                    .clone()
-                    .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))))
-                .or(scoped_block.clone())
-                .or(ident.clone().map(Expr::Ident));
-
-            // http://en.wikipedia.org/wiki/Order_of_operations#Programming_languages
-            let op = choice((
-                just(Token::Op("-".to_string())).to(UnaryOp::Neg),
-                just(Token::Op("!".to_string())).to(UnaryOp::Not),
-            ));
-            let unary = op.repeated().then(atom).foldr(|op, rhs| Expr::Unary {
-                op,
-                expr: Box::new(rhs),
+        let apply = atom
+            .clone()
+            .then(
+                expr.clone()
+                    .separated_by(just(Token::Ctrl(',')))
+                    .allow_trailing()
+                    .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')')))
+                    .collect::<Vec<_>>()
+                    .repeated(),
+            )
+            .foldl(|r#fn, args| Expr::Apply {
+                r#fn: Box::new(r#fn),
+                args,
             });
 
-            let op = choice((
-                just(Token::Op("%".to_string())).to(ArithBinaryOp::Mod),
-                just(Token::Op("*".to_string())).to(ArithBinaryOp::Mul),
-                just(Token::Op("/".to_string())).to(ArithBinaryOp::Div),
-            ));
-            let product = unary
-                .clone()
-                .then(op.then(unary).repeated())
-                .foldl(|lhs, (op, rhs)| Expr::Binary {
-                    op: BinaryOp::Arith(op),
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                });
+        // http://en.wikipedia.org/wiki/Order_of_operations#Programming_languages
+        let op = choice((
+            just(Token::Op("-".to_string())).to(UnaryOp::Neg),
+            just(Token::Op("!".to_string())).to(UnaryOp::Not),
+        ));
 
-            let op = choice((
-                just(Token::Op("+".to_string())).to(ArithBinaryOp::Add),
-                just(Token::Op("-".to_string())).to(ArithBinaryOp::Sub),
-            ));
-            let sum = product
-                .clone()
-                .then(op.then(product).repeated())
-                .foldl(|lhs, (op, rhs)| Expr::Binary {
-                    op: BinaryOp::Arith(op),
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                });
-
-            let op = choice((
-                just(Token::Op(">".to_string())).to(CompareBinaryOp::Gt),
-                just(Token::Op("<".to_string())).to(CompareBinaryOp::Lt),
-                just(Token::Op(">=".to_string())).to(CompareBinaryOp::Gte),
-                just(Token::Op("<=".to_string())).to(CompareBinaryOp::Lte),
-                just(Token::Op("==".to_string())).to(CompareBinaryOp::Eq),
-                just(Token::Op("!=".to_string())).to(CompareBinaryOp::Neq),
-            ));
-            let comp = sum
-                .clone()
-                .then(op.then(sum).repeated())
-                .foldl(|lhs, (op, rhs)| Expr::Binary {
-                    op: BinaryOp::Compare(op),
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                });
-
-            let op = choice((
-                just(Token::Op("&&".to_string())).to(LogicalBinaryOp::And),
-                just(Token::Op("||".to_string())).to(LogicalBinaryOp::Or),
-            ));
-
-            let logical = comp
-                .clone()
-                .then(op.then(comp).repeated())
-                .foldl(|lhs, (op, rhs)| Expr::Binary {
-                    op: BinaryOp::Logical(op),
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                });
-            logical
+        let unary = op.repeated().then(apply).foldr(|op, rhs| Expr::Unary {
+            op,
+            expr: Box::new(rhs),
         });
+
+        let op = choice((
+            just(Token::Op("%".to_string())).to(ArithBinaryOp::Mod),
+            just(Token::Op("*".to_string())).to(ArithBinaryOp::Mul),
+            just(Token::Op("/".to_string())).to(ArithBinaryOp::Div),
+        ));
+
+        let product = unary
+            .clone()
+            .then(op.then(unary).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::Binary {
+                op: BinaryOp::Arith(op),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            });
+
+        let op = choice((
+            just(Token::Op("+".to_string())).to(ArithBinaryOp::Add),
+            just(Token::Op("-".to_string())).to(ArithBinaryOp::Sub),
+        ));
+        let sum = product
+            .clone()
+            .then(op.then(product).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::Binary {
+                op: BinaryOp::Arith(op),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            });
+
+        let op = choice((
+            just(Token::Op(">".to_string())).to(CompareBinaryOp::Gt),
+            just(Token::Op("<".to_string())).to(CompareBinaryOp::Lt),
+            just(Token::Op(">=".to_string())).to(CompareBinaryOp::Gte),
+            just(Token::Op("<=".to_string())).to(CompareBinaryOp::Lte),
+            just(Token::Op("==".to_string())).to(CompareBinaryOp::Eq),
+            just(Token::Op("!=".to_string())).to(CompareBinaryOp::Neq),
+        ));
+        let comp = sum
+            .clone()
+            .then(op.then(sum).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::Binary {
+                op: BinaryOp::Compare(op),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            });
+
+        let op = choice((
+            just(Token::Op("&&".to_string())).to(LogicalBinaryOp::And),
+            just(Token::Op("||".to_string())).to(LogicalBinaryOp::Or),
+        ));
+
+        let logical = comp
+            .clone()
+            .then(op.then(comp).repeated())
+            .foldl(|lhs, (op, rhs)| Expr::Binary {
+                op: BinaryOp::Logical(op),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            });
+
+        let inline_expr = logical;
 
         let decl = just(Token::Let)
             .ignore_then(ident.clone())
@@ -208,7 +201,7 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
             });
 
         let cond = just(Token::If)
-            .ignore_then(inline_expr.clone())
+            .ignore_then(expr.clone())
             .then(scoped_block.clone())
             .then(just(Token::Else).ignore_then(scoped_block.clone()).or_not())
             .map(|((pred, conseq), alt)| Expr::Cond {
@@ -218,7 +211,7 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
             });
 
         let while_ = just(Token::While)
-            .ignore_then(inline_expr.clone())
+            .ignore_then(expr.clone())
             .then(scoped_block.clone())
             .map(|(pred, body)| Stmt::While {
                 pred: Box::new(pred),
@@ -242,34 +235,23 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
                 expr: Box::new(body),
             });
 
-        let apply = ident
-            .clone()
-            .then(
-                inline_expr
-                    .clone()
-                    .separated_by(just(Token::Ctrl(',')))
-                    .allow_trailing()
-                    .collect()
-                    .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))),
-            )
-            .map(|(r#fn, args)| Expr::Apply { r#fn, args });
+        let jump = choice((
+            just(Token::Return)
+                .ignore_then(inline_expr.clone().or_not())
+                .map(|expr| Stmt::Return(Box::new(expr.unwrap_or(Expr::Literal(Value::Void))))),
+            just(Token::Break).to(Stmt::Break),
+            just(Token::Continue).to(Stmt::Continue),
+        ))
+        .then_ignore(just(Token::Ctrl(';')));
 
-        // Note: don't use `choice` here as order matters: put less specific parsers
-        // lower down the chain
-        let expr_ = cond
-            .or(assign)
-            .or(apply)
-            .or(inline_expr);
+        // Note: order matters: put less specific parsers lower down the chain
+        let expr_ = cond.or(assign).or(inline_expr);
 
         // Same here
-        let stmt = decl
-            .or(while_)
-            .or(fn_decl)
-            .or(expr_
-                .clone()
-                .then_ignore(just(Token::Ctrl(';')))
-                .map(Stmt::Expr)
-            );
+        let stmt = jump.or(decl).or(while_).or(fn_decl).or(expr_
+            .clone()
+            .then_ignore(just(Token::Ctrl(';')))
+            .map(Stmt::Expr));
 
         let block = recursive(|block| {
             let block = block.delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')));
@@ -278,7 +260,7 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
                 .then((expr_.or(block)).or_not())
                 .map(|(stmts, val)| {
                     if stmts.is_empty() {
-                        val.unwrap()
+                        val.unwrap_or(Expr::Literal(Value::Void))
                     } else {
                         Expr::Body {
                             stmts,
@@ -298,6 +280,21 @@ macro_rules! parser {
     };
 }
 
+const EXAMPLE: &str = r#"
+    canvas_init();
+
+    let rad_delta = 1;
+    let rad_angle = 0;
+    let radius = 20;
+
+    while rad_angle <= 2 * math_pi() {
+        let x = radius * math_cos(rad_angle);
+        let y = radius * math_sin(rad_angle);
+        canvas_draw_point(x, y);
+        rad_angle = rad_angle + rad_delta;
+    }
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,24 +302,7 @@ mod tests {
     #[test]
     fn lex() {
         assert_eq!(
-            lexer()
-                .parse(
-                    r#"
-            canvas_init();
-
-            let rad_delta = 1;
-            let rad_angle = 0;
-            let radius = 20;
-
-            while rad_angle <= 2 * math_pi() {
-                let x = radius * math_cos(rad_angle);
-                let y = radius * math_sin(rad_angle);
-                canvas_draw_point(x, y);
-                rad_angle = rad_angle + rad_delta;
-            }
-        "#
-                )
-                .unwrap(),
+            lexer().parse(EXAMPLE).unwrap(),
             [
                 Token::Ident("canvas_init".to_string()),
                 Token::Ctrl('('),
@@ -511,6 +491,9 @@ mod tests {
         assert_eq!(
             parser!(
                 r#"
+                {
+                    1 + 2
+                }
                 let a = {
                     let b = 0;
                     a = 1;
@@ -520,26 +503,33 @@ mod tests {
             "#
             ),
             Ok(Expr::Body {
-                stmts: vec![Stmt::Let {
-                    name: Ident("a".to_string()),
-                    expr: Box::new(Expr::Body {
-                        stmts: vec![
-                            Stmt::Let {
-                                name: Ident("b".to_string()),
-                                expr: Box::new(Expr::Literal(Value::Int(0))),
-                            },
-                            Stmt::Expr(Expr::Assign {
-                                name: Ident("a".to_string()),
-                                expr: Box::new(Expr::Literal(Value::Int(1))),
-                            }),
-                        ],
-                        val: Box::new(Expr::Binary {
-                            op: BinaryOp::Arith(ArithBinaryOp::Add),
-                            lhs: Box::new(Expr::Ident(Ident("a".to_string()))),
-                            rhs: Box::new(Expr::Ident(Ident("b".to_string()))),
-                        }),
+                stmts: vec![
+                    Stmt::Expr(Expr::Binary {
+                        op: BinaryOp::Arith(ArithBinaryOp::Add),
+                        lhs: Box::new(Expr::Literal(Value::Int(1))),
+                        rhs: Box::new(Expr::Literal(Value::Int(2))),
                     }),
-                },],
+                    Stmt::Let {
+                        name: Ident("a".to_string()),
+                        expr: Box::new(Expr::Body {
+                            stmts: vec![
+                                Stmt::Let {
+                                    name: Ident("b".to_string()),
+                                    expr: Box::new(Expr::Literal(Value::Int(0))),
+                                },
+                                Stmt::Expr(Expr::Assign {
+                                    name: Ident("a".to_string()),
+                                    expr: Box::new(Expr::Literal(Value::Int(1))),
+                                }),
+                            ],
+                            val: Box::new(Expr::Binary {
+                                op: BinaryOp::Arith(ArithBinaryOp::Add),
+                                lhs: Box::new(Expr::Ident(Ident("a".to_string()))),
+                                rhs: Box::new(Expr::Ident(Ident("b".to_string()))),
+                            }),
+                        }),
+                    },
+                ],
                 val: Box::new(Expr::Ident(Ident("a".to_string()))),
             })
         );
@@ -570,14 +560,21 @@ mod tests {
         assert_eq!(
             parser!(
                 r#"
-                while true {
+                while test(true) == 1 {
                     1
                 }
             "#
             ),
             Ok(Expr::Body {
                 stmts: vec![Stmt::While {
-                    pred: Box::new(Expr::Literal(Value::Bool(true))),
+                    pred: Box::new(Expr::Binary {
+                        op: BinaryOp::Compare(CompareBinaryOp::Eq),
+                        lhs: Box::new(Expr::Apply {
+                            r#fn: Box::new(Expr::Ident(Ident("test".to_string()))),
+                            args: vec![Expr::Literal(Value::Bool(true))],
+                        }),
+                        rhs: Box::new(Expr::Literal(Value::Int(1))),
+                    }),
                     body: Box::new(Expr::Literal(Value::Int(1))),
                 },],
                 val: Box::new(Expr::Literal(Value::Void)),
@@ -586,30 +583,151 @@ mod tests {
     }
 
     #[test]
-    fn parse_fn_decl_apply() {
+    fn parse_fn_apply() {
         assert_eq!(
             parser!(
                 r#"
                 fn add(a, b) {
-                    a + b
+                    fn add2 (a, b) {
+                        let c = 1;
+                        a + b
+                    }
+                    return add2(a, b);
                 }
-                add(1, 2)
+                add(1, 2)()
             "#
             ),
             Ok(Expr::Body {
                 stmts: vec![Stmt::Fn {
                     name: Ident("add".to_string()),
                     params: vec![Ident("a".to_string()), Ident("b".to_string())],
-                    expr: Box::new(Expr::Binary {
-                        op: BinaryOp::Arith(ArithBinaryOp::Add),
-                        lhs: Box::new(Expr::Ident(Ident("a".to_string()))),
-                        rhs: Box::new(Expr::Ident(Ident("b".to_string()))),
+                    expr: Box::new(Expr::Body {
+                        stmts: vec![
+                            Stmt::Fn {
+                                name: Ident("add2".to_string()),
+                                params: vec![Ident("a".to_string()), Ident("b".to_string())],
+                                expr: Box::new(Expr::Body {
+                                    stmts: vec![
+                                        Stmt::Let {
+                                            name: Ident("c".to_string()),
+                                            expr: Box::new(Expr::Literal(Value::Int(1))),
+                                        },
+                                    ],
+                                    val: Box::new(Expr::Binary {
+                                        op: BinaryOp::Arith(ArithBinaryOp::Add),
+                                        lhs: Box::new(Expr::Ident(Ident("a".to_string()))),
+                                        rhs: Box::new(Expr::Ident(Ident("b".to_string()))),
+                                    }),
+                                }),
+                            },
+                            Stmt::Return(Box::new(Expr::Apply {
+                                r#fn: Box::new(Expr::Ident(Ident("add2".to_string()))),
+                                args: vec![
+                                    Expr::Ident(Ident("a".to_string())),
+                                    Expr::Ident(Ident("b".to_string())),
+                                ],
+                            })),
+                        ],
+                        val: Box::new(Expr::Literal(Value::Void)),
                     }),
-                },],
+                }],
                 val: Box::new(Expr::Apply {
-                    r#fn: Ident("add".to_string()),
-                    args: vec![Expr::Literal(Value::Int(1)), Expr::Literal(Value::Int(2))],
+                    r#fn: Box::new(Expr::Apply {
+                        r#fn: Box::new(Expr::Ident(Ident("add".to_string()))),
+                        args: vec![Expr::Literal(Value::Int(1)), Expr::Literal(Value::Int(2))],
+                    }),
+                    args: vec![Expr::Literal(Value::Void)],
                 }),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_example() {
+        assert_eq!(
+            parser!(EXAMPLE),
+            Ok(Expr::Body {
+                stmts: vec![
+                    Stmt::Expr(Expr::Apply {
+                        r#fn: Box::new(Expr::Ident(Ident("canvas_init".to_string()))),
+                        args: vec![Expr::Literal(Value::Void)],
+                    }),
+                    Stmt::Let {
+                        name: Ident("rad_delta".to_string()),
+                        expr: Box::new(Expr::Literal(Value::Int(1))),
+                    },
+                    Stmt::Let {
+                        name: Ident("rad_angle".to_string()),
+                        expr: Box::new(Expr::Literal(Value::Int(0))),
+                    },
+                    Stmt::Let {
+                        name: Ident("radius".to_string()),
+                        expr: Box::new(Expr::Literal(Value::Int(20))),
+                    },
+                    Stmt::While {
+                        pred: Box::new(Expr::Binary {
+                            op: BinaryOp::Compare(CompareBinaryOp::Lte),
+                            lhs: Box::new(Expr::Ident(Ident("rad_angle".to_string()))),
+                            rhs: Box::new(Expr::Binary {
+                                op: BinaryOp::Arith(ArithBinaryOp::Mul),
+                                lhs: Box::new(Expr::Literal(Value::Int(2))),
+                                rhs: Box::new(Expr::Apply {
+                                    r#fn: Box::new(Expr::Ident(Ident("math_pi".to_string()))),
+                                    args: vec![Expr::Literal(Value::Void)],
+                                }),
+                            }),
+                        }),
+                        body: Box::new(Expr::Body {
+                            stmts: vec![
+                                Stmt::Let {
+                                    name: Ident("x".to_string()),
+                                    expr: Box::new(Expr::Binary {
+                                        op: BinaryOp::Arith(ArithBinaryOp::Mul),
+                                        lhs: Box::new(Expr::Ident(Ident("radius".to_string()))),
+                                        rhs: Box::new(Expr::Apply {
+                                            r#fn: Box::new(Expr::Ident(Ident(
+                                                "math_cos".to_string()
+                                            ))),
+                                            args: vec![Expr::Ident(Ident("rad_angle".to_string()))],
+                                        }),
+                                    }),
+                                },
+                                Stmt::Let {
+                                    name: Ident("y".to_string()),
+                                    expr: Box::new(Expr::Binary {
+                                        op: BinaryOp::Arith(ArithBinaryOp::Mul),
+                                        lhs: Box::new(Expr::Ident(Ident("radius".to_string()))),
+                                        rhs: Box::new(Expr::Apply {
+                                            r#fn: Box::new(Expr::Ident(Ident(
+                                                "math_sin".to_string()
+                                            ))),
+                                            args: vec![Expr::Ident(Ident("rad_angle".to_string()))],
+                                        }),
+                                    }),
+                                },
+                                Stmt::Expr(Expr::Apply {
+                                    r#fn: Box::new(Expr::Ident(Ident(
+                                        "canvas_draw_point".to_string()
+                                    ))),
+                                    args: vec![
+                                        Expr::Ident(Ident("x".to_string())),
+                                        Expr::Ident(Ident("y".to_string())),
+                                    ],
+                                }),
+                                Stmt::Expr(Expr::Assign {
+                                    name: Ident("rad_angle".to_string()),
+                                    expr: Box::new(Expr::Binary {
+                                        op: BinaryOp::Arith(ArithBinaryOp::Add),
+                                        lhs: Box::new(Expr::Ident(Ident("rad_angle".to_string()))),
+                                        rhs: Box::new(Expr::Ident(Ident("rad_delta".to_string()))),
+                                    }),
+                                }),
+                            ],
+                            val: Box::new(Expr::Literal(Value::Void)),
+                        }),
+                    },
+                ],
+                val: Box::new(Expr::Literal(Value::Void)),
             })
         );
     }
