@@ -82,7 +82,7 @@ pub enum Expr {
         alt: Box<Expr>,
     },
     Apply {
-        r#fn: Box<Expr>,
+        r#fn: Ident,
         args: Vec<Expr>,
     },
 }

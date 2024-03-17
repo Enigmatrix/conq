@@ -95,7 +95,11 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
 
 pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     recursive(|expr| {
-        let block_ = expr
+        let ident = select! {
+            Token::Ident(s) => Ident(s),
+        };
+
+        let scoped_block = expr
             .clone()
             .delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')));
 
@@ -107,16 +111,12 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
             }
             .map(Expr::Literal);
 
-            let ident = select! {
-                Token::Ident(s) => Ident(s),
-            };
-
             let atom = val
                 .or(expr
                     .clone()
                     .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))))
-                .or(block_.clone())
-                .or(ident.map(Expr::Ident));
+                .or(scoped_block.clone())
+                .or(ident.clone().map(Expr::Ident));
 
             // http://en.wikipedia.org/wiki/Order_of_operations#Programming_languages
             let op = choice((
@@ -188,10 +188,8 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
             logical
         });
 
-        let let_ = just(Token::Let)
-            .ignore_then(select! {
-                Token::Ident(s) => Ident(s),
-            })
+        let decl = just(Token::Let)
+            .ignore_then(ident.clone())
             .then_ignore(just(Token::Op("=".to_string())))
             .then(inline_expr.clone())
             .then_ignore(just(Token::Ctrl(';')))
@@ -200,36 +198,78 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
                 expr: Box::new(expr),
             });
 
-        let assign = select! {
-            Token::Ident(s) => Ident(s),
-        }
-        .then_ignore(just(Token::Op("=".to_string())))
-        .then(inline_expr.clone())
-        .map(|(name, expr)| Expr::Assign {
-            name,
-            expr: Box::new(expr),
-        });
+        let assign = ident
+            .clone()
+            .then_ignore(just(Token::Op("=".to_string())))
+            .then(inline_expr.clone())
+            .map(|(name, expr)| Expr::Assign {
+                name,
+                expr: Box::new(expr),
+            });
 
-        let if_ = just(Token::If)
+        let cond = just(Token::If)
             .ignore_then(inline_expr.clone())
-            .then(block_.clone())
-            .then(
-                just(Token::Else)
-                .ignore_then(block_.clone())
-                .or_not()
-            )
+            .then(scoped_block.clone())
+            .then(just(Token::Else).ignore_then(scoped_block.clone()).or_not())
             .map(|((pred, conseq), alt)| Expr::Cond {
                 pred: Box::new(pred),
                 conseq: Box::new(conseq),
                 alt: Box::new(alt.unwrap_or(Expr::Literal(Value::Void))),
             });
 
-        let expr_ = assign.or(inline_expr).or(if_);
+        let while_ = just(Token::While)
+            .ignore_then(inline_expr.clone())
+            .then(scoped_block.clone())
+            .map(|(pred, body)| Stmt::While {
+                pred: Box::new(pred),
+                body: Box::new(body),
+            });
 
-        let stmt = let_.or(expr_
+        let fn_decl = just(Token::Fn)
+            .ignore_then(ident.clone())
+            .then(
+                ident
+                    .clone()
+                    .separated_by(just(Token::Ctrl(',')))
+                    .allow_trailing()
+                    .collect()
+                    .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))),
+            )
+            .then(scoped_block.clone())
+            .map(|((name, params), body)| Stmt::Fn {
+                name,
+                params,
+                expr: Box::new(body),
+            });
+
+        let apply = ident
             .clone()
-            .then_ignore(just(Token::Ctrl(';')))
-            .map(Stmt::Expr));
+            .then(
+                inline_expr
+                    .clone()
+                    .separated_by(just(Token::Ctrl(',')))
+                    .allow_trailing()
+                    .collect()
+                    .delimited_by(just(Token::Ctrl('(')), just(Token::Ctrl(')'))),
+            )
+            .map(|(r#fn, args)| Expr::Apply { r#fn, args });
+
+        // Note: don't use `choice` here as order matters: put less specific parsers
+        // lower down the chain
+        let expr_ = cond
+            .or(assign)
+            .or(apply)
+            .or(inline_expr);
+
+        // Same here
+        let stmt = decl
+            .or(while_)
+            .or(fn_decl)
+            .or(expr_
+                .clone()
+                .then_ignore(just(Token::Ctrl(';')))
+                .map(Stmt::Expr)
+            );
 
         let block = recursive(|block| {
             let block = block.delimited_by(just(Token::Ctrl('{')), just(Token::Ctrl('}')));
@@ -506,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_cond () {
+    fn parse_cond() {
         assert_eq!(
             parser!(
                 r#"
@@ -521,6 +561,55 @@ mod tests {
                 pred: Box::new(Expr::Literal(Value::Bool(true))),
                 conseq: Box::new(Expr::Literal(Value::Int(1))),
                 alt: Box::new(Expr::Literal(Value::Int(0))),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_while() {
+        assert_eq!(
+            parser!(
+                r#"
+                while true {
+                    1
+                }
+            "#
+            ),
+            Ok(Expr::Body {
+                stmts: vec![Stmt::While {
+                    pred: Box::new(Expr::Literal(Value::Bool(true))),
+                    body: Box::new(Expr::Literal(Value::Int(1))),
+                },],
+                val: Box::new(Expr::Literal(Value::Void)),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_fn_decl_apply() {
+        assert_eq!(
+            parser!(
+                r#"
+                fn add(a, b) {
+                    a + b
+                }
+                add(1, 2)
+            "#
+            ),
+            Ok(Expr::Body {
+                stmts: vec![Stmt::Fn {
+                    name: Ident("add".to_string()),
+                    params: vec![Ident("a".to_string()), Ident("b".to_string())],
+                    expr: Box::new(Expr::Binary {
+                        op: BinaryOp::Arith(ArithBinaryOp::Add),
+                        lhs: Box::new(Expr::Ident(Ident("a".to_string()))),
+                        rhs: Box::new(Expr::Ident(Ident("b".to_string()))),
+                    }),
+                },],
+                val: Box::new(Expr::Apply {
+                    r#fn: Ident("add".to_string()),
+                    args: vec![Expr::Literal(Value::Int(1)), Expr::Literal(Value::Int(2))],
+                }),
             })
         );
     }
