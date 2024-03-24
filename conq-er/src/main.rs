@@ -1,7 +1,5 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
-use std::rc::Rc;
-
 use gloo::utils::window;
 use gloo::{/* console::log, */events::EventListener};
 use stylist::yew::{styled_component, Global};
@@ -11,6 +9,8 @@ use yew_autoprops::autoprops;
 
 use monaco::{api::CodeEditorOptions, sys::editor::BuiltinTheme, yew::CodeEditor};
 
+mod monaco_conq;
+
 #[derive(Clone, PartialEq)]
 enum SplitAxis {
     Horizontal,
@@ -19,11 +19,11 @@ enum SplitAxis {
 
 const MIN_AXIS: i32 = 200;
 
-const CONTENT: &str = include_str!("main.rs");
+const CONTENT: &str = include_str!("template.cq");
 
 fn get_options() -> CodeEditorOptions {
     CodeEditorOptions::default()
-        .with_language("rust".to_owned())
+        .with_language(monaco_conq::ID.to_string())
         .with_value(CONTENT.to_owned())
         .with_builtin_theme(BuiltinTheme::VsDark)
         .with_automatic_layout(true)
@@ -31,9 +31,8 @@ fn get_options() -> CodeEditorOptions {
 
 #[styled_component]
 pub fn Editor() -> Html {
-    let options = Rc::new(get_options());
     html! {
-        <CodeEditor classes={"full"} options={ options.to_sys_options() } />
+        <CodeEditor classes={"full"} options={ get_options().to_sys_options() } />
     }
 }
 
@@ -289,5 +288,6 @@ pub fn App() -> Html {
 }
 
 fn main() {
+    monaco_conq::register_conq();
     yew::Renderer::<App>::new().render();
 }

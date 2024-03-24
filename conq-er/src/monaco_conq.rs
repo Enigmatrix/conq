@@ -38,6 +38,6 @@ fn language_configuration() -> LanguageConfiguration {
     }
 
     let cfg: LanguageConfiguration = Object::new().unchecked_into();
-    cfg.set_brackets(Some(&brackets));
+    cfg.set_colorized_bracket_pairs(Some(&brackets));
     cfg
 }

@@ -1,33 +1,25 @@
 export const makeTokensProvider = () => {
     return {
         keywords: [
-            "and",
             "break",
-            "class",
+            "continue",
             "else",
-            "false",
+            "fn",
             "for",
             "fun",
             "if",
-            "init",
             "let",
-            "nil",
-            "or",
-            "print",
             "return",
-            "super",
-            "this",
             "true",
-            "var",
             "while",
         ],
 
         operators: [
-            ":",
             "-",
             "+",
             "/",
             "*",
+            "%",
             "!",
             "!=",
             "=",
@@ -36,6 +28,8 @@ export const makeTokensProvider = () => {
             ">=",
             "<",
             "<=",
+            "&&",
+            "||",
             ",",
         ],
 
@@ -48,7 +42,7 @@ export const makeTokensProvider = () => {
                     /[a-z_$][\w$]*/,
                     { cases: { "@keywords": "keyword", "@default": "identifier" } },
                 ],
-                [/[A-Z][\w\$]*/, "type.identifier"], // to show class names nicely
+                // [/[A-Z][\w\$]*/, "type.identifier"], // to show class names nicely
 
                 // whitespace
                 { include: "@whitespace" },
@@ -58,7 +52,7 @@ export const makeTokensProvider = () => {
                 [/@symbols/, { cases: { "@operators": "operators", "@default": "" } }],
 
                 // numbers
-                [/\d*\.\d+/, "number.float"],
+                // [/\d*\.\d+/, "number.float"],
                 [/\d+/, "number"],
 
                 // delimiter: after number because of .\d floats
