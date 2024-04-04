@@ -52,7 +52,7 @@ pub enum Value {
     Void
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, Ord)]
 pub struct Ident(pub String);
 
 #[derive(Debug, PartialEq, Clone)]
