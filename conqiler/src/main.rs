@@ -1,26 +1,36 @@
+use std::{
+    error::Error,
+    fs::{read_to_string, File},
+    io::{Read, Write},
+    process::Command,
+};
+mod translate;
+
 use melior::{
-    dialect::{arith, func, DialectRegistry},
+    dialect::{arith, func, llvm, DialectRegistry},
     ir::{
         attribute::{StringAttribute, TypeAttribute},
         r#type::FunctionType,
         *,
     },
-    utility::register_all_dialects,
+    utility::{register_all_dialects, register_all_llvm_translations},
     Context,
 };
+use tempfile::{tempfile, NamedTempFile};
 
 mod ast;
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let registry = DialectRegistry::new();
     register_all_dialects(&registry);
 
     let context = Context::new();
     context.append_dialect_registry(&registry);
     context.load_all_available_dialects();
+    register_all_llvm_translations(&context);
 
     let location = Location::unknown(&context);
-    let module = Module::new(location);
+    let mut module = Module::new(location);
 
     let index_type = Type::index(&context);
 
@@ -49,7 +59,10 @@ fn main() {
         location,
     ));
 
-    assert!(module.as_operation().verify());
-    let llir = module.as_operation().to_string();
-    println!("{}", llir);
+    let mut wasm_file = translate::compile_program(&context, &mut module)?;
+    let mut wasm = String::new();
+    wasm_file.read_to_string(&mut wasm)?;
+
+    println!("{}", wasm);
+    Ok(())
 }
