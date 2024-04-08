@@ -1,15 +1,21 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
-use std::rc::Rc;
-
-use gloo::utils::window;
-use gloo::{/* console::log, */events::EventListener};
+use gloo;
+use gloo::{utils::window, events::EventListener, console::log };
 use stylist::yew::{styled_component, Global};
+use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::HtmlElement;
 use yew::prelude::*;
 use yew_autoprops::autoprops;
 
-use monaco::{api::CodeEditorOptions, sys::editor::BuiltinTheme, yew::CodeEditor};
+use monaco::{
+    api::{CodeEditorOptions, TextModel},
+    sys::editor::{BuiltinTheme, IStandaloneCodeEditor},
+    yew::{CodeEditor, CodeEditorLink},
+};
+
+mod execute;
+use execute::execute;
 
 #[derive(Clone, PartialEq)]
 enum SplitAxis {
@@ -19,7 +25,7 @@ enum SplitAxis {
 
 const MIN_AXIS: i32 = 200;
 
-const CONTENT: &str = include_str!("main.rs");
+const CONTENT: &str = include_str!("../static/init.rs");
 
 fn get_options() -> CodeEditorOptions {
     CodeEditorOptions::default()
@@ -29,16 +35,27 @@ fn get_options() -> CodeEditorOptions {
         .with_automatic_layout(true)
 }
 
-#[styled_component]
-pub fn Editor() -> Html {
-    let options = Rc::new(get_options());
+#[derive(PartialEq, Properties)]
+pub struct EditorProps {
+    on_editor_created: Callback<CodeEditorLink>,
+    text_model: TextModel,
+}
+
+#[function_component]
+pub fn Editor(props: &EditorProps) -> Html {
+    let EditorProps {
+        on_editor_created,
+        text_model,
+    } = props;
+
     html! {
-        <CodeEditor classes={"full"} options={ options.to_sys_options() } />
+        <CodeEditor classes={"full"} options={ get_options().to_sys_options() } {on_editor_created} model={text_model.clone()} />
     }
 }
 
+#[autoprops]
 #[styled_component]
-pub fn Output() -> Html {
+pub fn Output(children: &Children) -> Html {
     html! {
         <div class={css!(r#"
             background: #222;
@@ -48,7 +65,7 @@ pub fn Output() -> Html {
             height: 100%;
             width: 100%;
         "#)}>
-            <pre>{"test out please ignore"}</pre>
+            <pre>{children.clone()}</pre>
         </div>
     }
 }
@@ -84,7 +101,7 @@ pub fn Divider(on_mouse_down: Callback<PointerEvent>) -> Html {
 #[function_component]
 pub fn LeftPane(
     left_width: Option<i32>,
-    set_left_width: Callback<i32>,
+    init_left_width: Callback<i32>,
     children: &Children,
 ) -> Html {
     let left_ref = use_node_ref();
@@ -92,14 +109,13 @@ pub fn LeftPane(
 
     {
         let left_width = left_width.clone();
-        let set_left_width = set_left_width.clone();
+        let init_left_width = init_left_width.clone();
         let left_ref = left_ref.clone();
 
-        use_effect_with(left_width.clone(), move |_| {
+        use_effect_with((left_width.clone(), axis.clone()), move |_| {
             if let Some(left_div) = left_ref.cast::<HtmlElement>() {
                 if left_width.is_none() {
-                    left_div.style().set_property("flex", "1").unwrap();
-                    set_left_width.emit(match axis {
+                    init_left_width.emit(match axis {
                         SplitAxis::Horizontal => left_div.client_width(),
                         SplitAxis::Vertical => left_div.client_height(),
                     });
@@ -107,18 +123,24 @@ pub fn LeftPane(
                 } else {
                     left_div
                         .style()
-                        .set_property( match axis {
-                            SplitAxis::Horizontal => "width",
-                            SplitAxis::Vertical => "height",
-                        }, &format!("{}px", left_width.unwrap()))
+                        .set_property(
+                            match axis {
+                                SplitAxis::Horizontal => "width",
+                                SplitAxis::Vertical => "height",
+                            },
+                            &format!("{}px", left_width.unwrap()),
+                        )
                         .unwrap();
-                    left_div.style().set_property(
-                        match axis {
-                            SplitAxis::Horizontal => "height",
-                            SplitAxis::Vertical => "width",
-                        },
-                        "unset",
-                    ).unwrap();
+                    left_div
+                        .style()
+                        .set_property(
+                            match axis {
+                                SplitAxis::Horizontal => "height",
+                                SplitAxis::Vertical => "width",
+                            },
+                            "unset",
+                        )
+                        .unwrap();
                 }
             }
             || {}
@@ -126,7 +148,7 @@ pub fn LeftPane(
     }
 
     html! {
-        <div ref={left_ref.clone()}>
+        <div style="flex: 1;" ref={left_ref.clone()}>
             {children.clone()}
         </div>
     }
@@ -136,16 +158,35 @@ pub fn LeftPane(
 #[styled_component]
 pub fn SplitPane(left: &Html, right: &Html) -> Html {
     let left_width = use_state_eq(|| None);
+    let left_frac = use_state_eq(|| 0.5);
     let divider_x = use_state_eq(|| None);
     let is_dragging = use_state_eq(|| false);
     let axis_ctx = use_state_eq(|| SplitAxis::Horizontal);
 
     let split_pane_ref = use_node_ref();
 
-    let set_left_width = {
+    let sync_split_axis = {
+        let axis_ctx = axis_ctx.clone();
+        move || {
+            let new_axis;
+            if window().inner_width().unwrap().as_f64().unwrap()
+                < window().inner_height().unwrap().as_f64().unwrap()
+            {
+                new_axis = SplitAxis::Vertical;
+            } else {
+                new_axis = SplitAxis::Horizontal;
+            }
+            axis_ctx.set(new_axis.clone());
+            new_axis
+        }
+    };
+
+    let init_left_width = {
         let left_width = left_width.clone();
+        let sync_split_axis = sync_split_axis.clone();
         Callback::from(move |value: i32| {
             left_width.set(Some(value));
+            sync_split_axis();
         })
     };
 
@@ -165,23 +206,25 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
 
     let set_width_bounded = {
         let left_width = left_width.clone();
+        let left_frac = left_frac.clone();
         let split_pane_ref = split_pane_ref.clone();
         let axis_ctx = axis_ctx.clone();
         Callback::from(move |value: i32| {
-            if value < MIN_AXIS {
-                left_width.set(Some(MIN_AXIS));
-                return;
-            }
-            if let Some(left_div) = split_pane_ref.cast::<HtmlElement>() {
+            if let Some(split_pane_div) = split_pane_ref.cast::<HtmlElement>() {
+                let new_width;
                 let parent_len = match *axis_ctx {
-                    SplitAxis::Horizontal => left_div.client_width(),
-                    SplitAxis::Vertical => left_div.client_height(),
+                    SplitAxis::Horizontal => split_pane_div.client_width(),
+                    SplitAxis::Vertical => split_pane_div.client_height(),
                 };
-                if value > parent_len - MIN_AXIS {
-                    left_width.set(Some(parent_len - MIN_AXIS));
+                if value < MIN_AXIS {
+                    new_width = MIN_AXIS;
+                } else if value > parent_len - MIN_AXIS {
+                    new_width = parent_len - MIN_AXIS;
                 } else {
-                    left_width.set(Some(value));
+                    new_width = value;
                 }
+                left_width.set(Some(new_width));
+                left_frac.set(new_width as f64 / parent_len as f64);
             }
         })
     };
@@ -190,7 +233,7 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
         let left_width = left_width.clone();
         let divider_x = divider_x.clone();
         let is_dragging = is_dragging.clone();
-        let set_with_bounded = set_width_bounded.clone();
+        let set_width_bounded = set_width_bounded.clone();
         let axis_ctx = axis_ctx.clone();
         Callback::from(move |event: PointerEvent| {
             if *is_dragging {
@@ -199,10 +242,9 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
                         SplitAxis::Horizontal => event.client_x(),
                         SplitAxis::Vertical => event.client_y(),
                     };
-                    let new_width =
-                        left_width.unwrap() + (drag_len - divider_x.unwrap());
+                    let new_width = left_width.unwrap() + (drag_len - divider_x.unwrap());
                     divider_x.set(Some(drag_len));
-                    set_with_bounded.emit(new_width);
+                    set_width_bounded.emit(new_width);
                 }
             }
         })
@@ -217,20 +259,25 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
 
     use_effect_with((), {
         let axis_ctx = axis_ctx.clone();
+        let left_frac = left_frac.clone();
         let left_width = left_width.clone();
+        let split_pane_ref = split_pane_ref.clone();
+        let sync_split_axis = sync_split_axis.clone();
         move |_| {
             EventListener::new(&window(), "resize", move |_| {
-                let new_axis;
-                if window().inner_width().unwrap().as_f64().unwrap()
-                    < window().inner_height().unwrap().as_f64().unwrap()
-                {
-                    new_axis = SplitAxis::Vertical;
-                } else {
-                    new_axis = SplitAxis::Horizontal;
+                let new_axis = sync_split_axis();
+                axis_ctx.set(new_axis.clone());
+
+                if let Some(split_pane_div) = split_pane_ref.cast::<HtmlElement>() {
+                    let parent_len = match new_axis {
+                        SplitAxis::Horizontal => split_pane_div.client_width(),
+                        SplitAxis::Vertical => split_pane_div.client_height(),
+                    };
+                    let new_width = (*left_frac * parent_len as f64) as i32;
+                    left_width.set(Some(new_width));
                 }
-                left_width.set(None);
-                axis_ctx.set(new_axis);
-            }).forget();
+            })
+            .forget();
             || {}
         }
     });
@@ -254,7 +301,7 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
         >
             <LeftPane
                 left_width={&*left_width}
-                set_left_width={set_left_width.clone()}
+                init_left_width={init_left_width.clone()}
             >
                 {left.clone()}
             </LeftPane>
@@ -269,6 +316,50 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
 
 #[styled_component]
 pub fn App() -> Html {
+    let text_model = use_state_eq(|| TextModel::create(CONTENT, Some("rust"), None).unwrap());
+    let out = use_state_eq(|| String::from(CONTENT));
+
+    // https://github.com/siku2/rust-monaco/blob/main/examples/yew_events_keymapping/src/main.rs
+    let on_editor_created = {
+        // We need to clone the text_model/code so we can use them.
+        let text_model = text_model.clone();
+        let out = out.clone();
+
+        // This is a javascript closure, used to pass to Monaco, using wasm-bindgen.
+        let js_closure = {
+            let text_model = text_model.clone();
+
+            // We update the code state when the Monaco model changes.
+            // See https://yew.rs/docs/0.20.0/concepts/function-components/pre-defined-hooks
+            Closure::<dyn Fn()>::new(move || {
+                let res = execute(text_model.get_value());
+                match res {
+                    Ok(output) => out.set(output),
+                    Err(e) => log!("Error: ", e.to_string()),
+                }
+            })
+        };
+
+        // Here we define our callback, we use use_callback as we want to re-render when dependencies change.
+        // See https://yew.rs/docs/concepts/function-components/state#general-view-of-how-to-store-state
+        use_callback(
+            text_model,
+            move |editor_link: CodeEditorLink, _text_model| {
+                editor_link.with_editor(|editor| {
+                    // Registers Ctrl/Cmd + Enter hotkey
+                    let keycode = monaco::sys::KeyCode::Enter.to_value()
+                        | (monaco::sys::KeyMod::ctrl_cmd() as u32);
+                    let raw_editor: &IStandaloneCodeEditor = editor.as_ref();
+
+                    raw_editor.add_command(
+                        keycode.into(),
+                        js_closure.as_ref().unchecked_ref(),
+                        None,
+                    );
+                });
+            },
+        )
+    };
     html! {
         <>
             // Global Styles can be applied with <Global /> component.
@@ -281,8 +372,13 @@ pub fn App() -> Html {
                     }
                 "#)} />
             <SplitPane
-                left={html!{<Editor />} }
-                right={html!{<Output />}}
+                left={html!{<Editor {on_editor_created} text_model={(*text_model).clone()} />} }
+                right={html!{
+                    <Output>
+                        <p style="color:#888;">{"Press CTRL+Enter / Command+Enter to run\n\n"}</p>
+                        {out.to_string()}
+                    </Output>
+                }}
             />
         </>
     }
