@@ -19,6 +19,7 @@ use melior::{
 use tempfile::{tempfile, NamedTempFile};
 
 mod ast;
+mod parser;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let registry = DialectRegistry::new();

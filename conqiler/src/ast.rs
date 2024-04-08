@@ -1,8 +1,11 @@
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum Ast {
     Stmt(Stmt),
     Expr(Expr),
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum ArithBinaryOp {
     Add,
     Sub,
@@ -11,6 +14,7 @@ pub enum ArithBinaryOp {
     Mod,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum CompareBinaryOp {
     Gt,
     Lt,
@@ -20,35 +24,38 @@ pub enum CompareBinaryOp {
     Neq,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum LogicalBinaryOp {
     Or,
     And,
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum BinaryOp {
     Arith(ArithBinaryOp),
     Compare(CompareBinaryOp),
     Logical(LogicalBinaryOp),
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum UnaryOp {
     Not,
     Neg,
 }
 
-pub enum Type {
-    Int,
-    /*Float,*/ Bool,
-    String,
-    Void,
+#[derive(Debug, PartialEq, Clone)]
+pub enum Value {
+    Int(i64),
+    /*Float(f64),*/
+    Bool(bool),
+    String(String),
+    Void
 }
 
-pub struct Value {
-    typ: Type, // TODO: Add value representation
-}
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, Ord)]
+pub struct Ident(pub String);
 
-pub struct Ident(String);
-
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Binary {
         op: BinaryOp,
@@ -80,6 +87,7 @@ pub enum Expr {
     },
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
     Expr(Expr),
     Let {
