@@ -1,13 +1,10 @@
 use std::{
     error::Error,
-    fs::{read_to_string, File},
-    io::{Read, Write},
-    process::Command,
+    io::Read
 };
-mod translate;
 
 use melior::{
-    dialect::{arith, func, llvm, DialectRegistry},
+    dialect::{arith, func, DialectRegistry},
     ir::{
         attribute::{StringAttribute, TypeAttribute},
         r#type::FunctionType,
@@ -16,10 +13,11 @@ use melior::{
     utility::{register_all_dialects, register_all_llvm_translations},
     Context,
 };
-use tempfile::{tempfile, NamedTempFile};
 
 mod ast;
 mod parser;
+mod translate;
+mod compile;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let registry = DialectRegistry::new();
