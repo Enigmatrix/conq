@@ -18,6 +18,7 @@ mod ast;
 mod parser;
 mod translate;
 mod compile;
+mod compile_expr;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let registry = DialectRegistry::new();
