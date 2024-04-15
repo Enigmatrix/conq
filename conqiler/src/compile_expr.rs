@@ -1,8 +1,8 @@
 use std::any::Any;
 
-use melior::ir::{TypeLike, ValueLike};
+use melior::ir::{Block, TypeLike, ValueLike};
 use melior::{dialect::*, ir, Context};
-use crate::compile::Compiler;
+use crate::compile::{Compiler, Environment};
 
 use crate::ast::{Expr, Ident, Stmt};
 
@@ -12,18 +12,18 @@ fn val<'a, 'i>(x: ir::OperationRef<'a, 'i>) -> ir::Value<'a, 'i> {
         .into()
 }
 
-impl<'a> Compiler<'a> {
+impl<'c> Compiler<'c> {
     
-    fn int_type(&self) -> ir::Type<'a> {
+    fn int_type(&self) -> ir::Type<'c> {
         ir::r#type::IntegerType::new(&self.ctx, 64).into()
     }
 
-    fn bool_type(&self) -> ir::Type<'a> {
+    fn bool_type(&self) -> ir::Type<'c> {
         ir::r#type::IntegerType::new(&self.ctx, 1).into()
     }
     
-    pub fn compile_literal_int(&self, cur_block: &'a ir::Block<'a>, i: i64) -> ir::Value<'a, 'a> {
-        val(cur_block.append_operation(arith::constant(
+    pub fn compile_literal_int(&self, cur_block: &mut Environment<'c, 'c>, i: i64) -> ir::Value<'c, 'c> {
+        val(cur_block.block().append_operation(arith::constant(
             &self.ctx,
             ir::attribute::IntegerAttribute::new(
                 self.int_type(),
@@ -31,8 +31,8 @@ impl<'a> Compiler<'a> {
             self.loc)))
     }
     
-    pub fn compile_literal_bool(&self, cur_block: &'a ir::Block<'a>, b: bool) -> ir::Value<'a, 'a> {
-        val(cur_block.append_operation(arith::constant(
+    pub fn compile_literal_bool(&self, cur_block: &mut Environment<'c, 'c>, b: bool) -> ir::Value<'c, 'c> {
+        val(cur_block.block().append_operation(arith::constant(
             &self.ctx,
             ir::attribute::IntegerAttribute::new(
                 self.bool_type(),
@@ -40,30 +40,44 @@ impl<'a> Compiler<'a> {
             self.loc)))
     }
 
-    pub fn compile_unary_not(&self, cur_block: &'a ir::Block<'a>, expr: Expr) -> ir::Value<'a, 'a> {
-        let v = self.compile_expr(cur_block, expr);
+    pub fn compile_unary_not(&self, env: &mut Environment<'c, 'c>, expr: Expr) -> ir::Value<'c, 'c> {
+        let btrue = self.compile_literal_bool(env, true);
+        let v = self.compile_expr(env, expr);
         if !v.r#type().eq(&self.bool_type()) {
             panic!("expected bool, got {v}");
         }
-        val(cur_block.append_operation(arith::xori(
+        val(env.block().append_operation(arith::xori(
             v,
-            self.compile_literal_bool(cur_block, true),
+            btrue,
             self.loc)))
     }
 
-    pub fn compile_unary_neg(&self, cur_block: &'a ir::Block<'a>, expr: Expr) -> ir::Value<'a, 'a> {
-        let v = self.compile_expr(cur_block, expr);
+    pub fn compile_unary_neg(&self, env: &mut Environment<'c, 'c>, expr: Expr) -> ir::Value<'c, 'c> {
+        let ineg1 = self.compile_literal_int(env, -1);
+        let v = self.compile_expr(env, expr);
         if !v.r#type().eq(&self.int_type()) {
             panic!("expected i64, got {v}");
         }
-        val(cur_block.append_operation(arith::muli(
+        val(env.block().append_operation(arith::muli(
             v,
-            self.compile_literal_int(cur_block, -1),
+            ineg1,
             self.loc)))
+    }
+
+
+    pub fn compile_block(&self, env: &mut Environment<'c, 'c>, stmts: Vec<Stmt>, expr: Expr) -> ir::Block<'c> {
+        let block = Block::new(&[]);
+        env.extend(&block);
+        for stmt in stmts {
+            self.compile_stmt(env, stmt);
+        }
+        let _val = self.compile_expr(env, expr);
+        env.pop();
+        block
     }
     
     
-    pub fn compile_expr(&self, cur_block: &'a ir::Block<'a>, expr: Expr) -> ir::Value<'a, 'a> {
+    pub fn compile_expr<'a>(&self, env: &mut Environment<'c, 'c>, expr: Expr) -> ir::Value<'c, 'c> {
         match expr {
             Expr::Binary { op, lhs, rhs } => match op {
                 crate::ast::BinaryOp::Arith(_) => todo!(),
@@ -71,12 +85,12 @@ impl<'a> Compiler<'a> {
                 crate::ast::BinaryOp::Logical(_) => todo!(),
             },
             Expr::Unary { op, expr } => match op {
-                crate::ast::UnaryOp::Not => self.compile_unary_not(cur_block, *expr),
-                crate::ast::UnaryOp::Neg => self.compile_unary_neg(cur_block, *expr),
+                crate::ast::UnaryOp::Not => self.compile_unary_not(env, *expr),
+                crate::ast::UnaryOp::Neg => self.compile_unary_neg(env, *expr),
             },
             Expr::Literal(v) => match v {
-                crate::ast::Value::Int(i) => self.compile_literal_int(cur_block, i),
-                crate::ast::Value::Bool(b) => self.compile_literal_bool(cur_block, b),
+                crate::ast::Value::Int(i) => self.compile_literal_int(env, i),
+                crate::ast::Value::Bool(b) => self.compile_literal_bool(env, b),
                 crate::ast::Value::String(_) => todo!(),
                 crate::ast::Value::Void => todo!(),
             },
@@ -84,8 +98,8 @@ impl<'a> Compiler<'a> {
                 todo!()
             },
             Expr::Assign { name, expr } => todo!(),
-            Expr::Body { stmts, val } => todo!(),
-            Expr::Cond { pred, conseq, alt } => todo!(),
+            Expr::Body{ stmts, val } => todo!(),
+            Expr::Cond{ pred, conseq, alt } => todo!(),
             Expr::Apply { r#fn, args } => todo!(),
         }
     }

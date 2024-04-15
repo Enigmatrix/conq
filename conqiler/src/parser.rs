@@ -2,6 +2,7 @@ use chumsky::prelude::*;
 
 use crate::ast::*;
 
+
 #[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub enum Token {
     Bool(bool),
@@ -262,7 +263,7 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
                     if stmts.is_empty() {
                         val.unwrap_or(Expr::Literal(Value::Void))
                     } else {
-                        Expr::Body {
+                        Expr::Body{
                             stmts,
                             val: Box::new(val.unwrap_or(Expr::Literal(Value::Void))),
                         }

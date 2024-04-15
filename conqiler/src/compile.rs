@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use melior::{dialect::*, ir::{self, Block, Module}, Context};
+use melior::{dialect::*, ir::{self, Block, Module, Region}, Context};
 
 use crate::ast::{Expr, Stmt};
 
@@ -29,6 +29,17 @@ impl<'c, 'a> Environment<'c, 'a> {
         }
     }
     
+    pub fn block(&self) -> &'a ir::Block<'a> {
+        self.frames.last().unwrap().block
+    }
+    
+    pub fn extend(&mut self, block: &'a ir::Block<'a>) {
+        self.frames.push(Frame::<'c, 'a>::new(block));
+    }
+    
+    pub fn pop(&mut self) {
+        self.frames.pop();
+    }
 }
 
 pub struct Compiler<'a> {
@@ -37,15 +48,24 @@ pub struct Compiler<'a> {
     pub module: ir::Module<'a>,
 }
 
-impl<'a> Compiler<'a> {
-    fn new(ctx: &'a Context) -> Self {
+impl<'c> Compiler<'c> {
+    fn new(ctx: &'c Context) -> Self {
         let loc = ir::Location::unknown(&ctx);
         let module = ir::Module::new(loc);
 
         Self { ctx, loc, module }
     }
     
-    fn compile_stmt(&'a self, cur_block: &'a ir::Block<'a>, stmt: Stmt) {
+    fn compile_expr_block_optim(&self, env: &mut Environment<'c, 'c>, region: &Region<'c>, expr: Expr) {
+        match expr {
+            Expr::Body{ stmts, val } => {
+
+            },
+            expr => todo!(),
+        }
+    }
+    
+    pub fn compile_stmt(&'c self, env: &mut Environment<'c, 'c>, stmt: Stmt) {
         match stmt {
             Stmt::Expr(_) => todo!(),
             Stmt::Let { name, expr } => todo!(),
@@ -57,7 +77,7 @@ impl<'a> Compiler<'a> {
                     let loc = self.loc.clone();
                     let region = ir::Region::new();
                     let block = region.append_block(ir::Block::new(&[]));
-                    let val = self.compile_expr(&block, *pred);
+                    let val = self.compile_expr(env, *pred);
                     block.append_operation(scf::condition(val, &[], loc));
                     region
                 };
@@ -69,7 +89,7 @@ impl<'a> Compiler<'a> {
                 };
 
                 let whl = scf::r#while(&[], &[], before_region, after_region, self.loc);
-                cur_block.append_operation(whl);
+                env.block().append_operation(whl);
             },
             Stmt::Fn { name, params, expr } => todo!(),
         }
@@ -83,7 +103,7 @@ mod tests {
 
     use melior::{dialect::DialectRegistry, ir::{Block, Operation}, utility::register_all_dialects};
 
-    use crate::ast::Value;
+    use crate::{ast::Value};
 
     use super::*;
 
@@ -97,7 +117,8 @@ mod tests {
 
         let compiler = Compiler::new(&ctx);
         let blkref = compiler.module.body();
-        compiler.compile_stmt(&blkref, Stmt::While {
+        let mut env = Environment::new(&blkref);
+        compiler.compile_stmt(&mut env, Stmt::While {
             pred: Box::new(Expr::Unary{ op: crate::ast::UnaryOp::Not, expr: Box::new(Expr::Literal(Value::Bool(true)))}),
             body: Box::new(Expr::Body { stmts: vec![], val: Box::new(Expr::Literal(Value::Int(1))) }),
         });
