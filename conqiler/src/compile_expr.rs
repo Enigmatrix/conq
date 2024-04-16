@@ -4,7 +4,7 @@ use melior::ir::ValueLike;
 use melior::{dialect::*, ir};
 use crate::compile::{Compiler, Environment};
 
-use crate::ast::{Expr, Ident, Stmt};
+use crate::ast::{ArithBinaryOp, CompareBinaryOp, Expr, Ident, LogicalBinaryOp, Stmt};
 
 fn val<'a, 'i>(x: ir::OperationRef<'a, 'i>) -> ir::Value<'a, 'i> {
     x.result(0)
@@ -20,6 +20,18 @@ impl<'c> Compiler<'c> {
 
     fn bool_type(&self) -> ir::Type<'c> {
         ir::r#type::IntegerType::new(&self.ctx, 1).into()
+    }
+
+    fn assert_int_type(&self, v: ir::Value<'c, '_>) {
+        if !v.r#type().eq(&self.int_type()) {
+            panic!("expected i64, got {v}");
+        }
+    }
+
+    fn assert_bool_type(&self, v: ir::Value<'c, '_>) {
+        if !v.r#type().eq(&self.bool_type()) {
+            panic!("expected bool, got {v}");
+        }
     }
     
     pub fn compile_literal_int<'a>(&self, block: &'a ir::Block<'c>, i: i64) -> ir::Value<'c, 'a> {
@@ -43,9 +55,7 @@ impl<'c> Compiler<'c> {
     pub fn compile_unary_not<'a>(&self, env: &mut Environment<'c, 'a>, expr: Expr) -> ir::Value<'c, 'a> {
         let btrue = self.compile_literal_bool(env.block(), true);
         let v = self.compile_expr(env, expr);
-        if !v.r#type().eq(&self.bool_type()) {
-            panic!("expected bool, got {v}");
-        }
+        self.assert_bool_type(v);
         val(env.block().append_operation(arith::xori(
             v,
             btrue,
@@ -55,9 +65,7 @@ impl<'c> Compiler<'c> {
     pub fn compile_unary_neg<'a>(&self, env: &mut Environment<'c, 'a>, expr: Expr) -> ir::Value<'c, 'a> {
         let ineg1 = self.compile_literal_int(env.block(), -1);
         let v = self.compile_expr(env, expr);
-        if !v.r#type().eq(&self.int_type()) {
-            panic!("expected i64, got {v}");
-        }
+        self.assert_int_type(v);
         val(env.block().append_operation(arith::muli(
             v,
             ineg1,
@@ -88,13 +96,54 @@ impl<'c> Compiler<'c> {
         }
     }
     
+    pub fn compile_arith_binary<'a>(&self, env: &mut Environment<'c, 'a>, op: ArithBinaryOp, lhs: Expr, rhs: Expr) -> ir::Value<'c, 'a> {
+        let lhs = self.compile_expr(env, lhs);
+        let rhs = self.compile_expr(env, rhs);
+        self.assert_int_type(lhs);
+        self.assert_int_type(rhs);
+        val(env.block().append_operation(match op {
+            ArithBinaryOp::Add => arith::addi(lhs, rhs, self.loc),
+            ArithBinaryOp::Sub => arith::subi(lhs, rhs, self.loc),
+            ArithBinaryOp::Mul => arith::muli(lhs, rhs, self.loc),
+            ArithBinaryOp::Div => arith::divsi(lhs, rhs, self.loc),
+            ArithBinaryOp::Mod => arith::remsi(lhs, rhs, self.loc),
+        }))
+    }
+    
+    pub fn compile_compare_binary<'a>(&self, env: &mut Environment<'c, 'a>, op: CompareBinaryOp, lhs: Expr, rhs: Expr) -> ir::Value<'c, 'a> {
+        let lhs = self.compile_expr(env, lhs);
+        let rhs = self.compile_expr(env, rhs);
+        self.assert_int_type(lhs);
+        self.assert_int_type(rhs);
+        val(env.block().append_operation(match op {
+            CompareBinaryOp::Gt => arith::cmpi(&self.ctx, arith::CmpiPredicate::Sgt, lhs, rhs, self.loc),
+            CompareBinaryOp::Lt => arith::cmpi(&self.ctx, arith::CmpiPredicate::Slt, lhs, rhs, self.loc),
+            CompareBinaryOp::Gte => arith::cmpi(&self.ctx, arith::CmpiPredicate::Sge, lhs, rhs, self.loc),
+            CompareBinaryOp::Lte => arith::cmpi(&self.ctx, arith::CmpiPredicate::Sle, lhs, rhs, self.loc),
+            CompareBinaryOp::Eq => arith::cmpi(&self.ctx, arith::CmpiPredicate::Eq, lhs, rhs, self.loc),
+            CompareBinaryOp::Neq => arith::cmpi(&self.ctx, arith::CmpiPredicate::Ne, lhs, rhs, self.loc),
+        }))
+    }
+    
+    pub fn compile_logical_binary<'a>(&self, env: &mut Environment<'c, 'a>, op: LogicalBinaryOp, lhs: Expr, rhs: Expr) -> ir::Value<'c, 'a> {
+        let lhs = self.compile_expr(env, lhs);
+        let rhs = self.compile_expr(env, rhs);
+        self.assert_bool_type(lhs);
+        self.assert_bool_type(rhs);
+        val(env.block().append_operation(match op {
+            LogicalBinaryOp::Or => todo!(), // need cond for tihs
+            LogicalBinaryOp::And => todo!(),
+            // TODO Xor
+        }))
+    }
+    
     
     pub fn compile_expr<'a>(&self, env: &mut Environment<'c, 'a>, expr: Expr) -> ir::Value<'c, 'a> {
         match expr {
             Expr::Binary { op, lhs, rhs } => match op {
-                crate::ast::BinaryOp::Arith(_) => todo!(),
-                crate::ast::BinaryOp::Compare(_) => todo!(),
-                crate::ast::BinaryOp::Logical(_) => todo!(),
+                crate::ast::BinaryOp::Arith(op) => self.compile_arith_binary(env, op, *lhs, *rhs),
+                crate::ast::BinaryOp::Compare(op) => self.compile_compare_binary(env, op, *lhs, *rhs),
+                crate::ast::BinaryOp::Logical(op) => self.compile_logical_binary(env, op, *lhs, *rhs),
             },
             Expr::Unary { op, expr } => match op {
                 crate::ast::UnaryOp::Neg => self.compile_unary_neg(env, *expr),
@@ -120,9 +169,28 @@ impl<'c> Compiler<'c> {
 
 #[cfg(test)]
 mod tests {
+    
+    use crate::{ast::Expr, compile::{tests::setup_ctx, Compiler, Environment}};
 
     #[test]
-    fn test_name() {
+    fn test_literal_int() {
+        let ctx = setup_ctx();
+        let compiler = Compiler::new(&ctx);
+        let global_body = compiler.module.body();
+        let mut env = Environment::new(&global_body);
+        compiler.compile_expr(&mut env, Expr::Literal(crate::ast::Value::Int(1)));
+        assert!(compiler.module.as_operation().verify());
+        compiler.module.as_operation().dump();
+    }
 
+    #[test]
+    fn test_literal_bool() {
+        let ctx = setup_ctx();
+        let compiler = Compiler::new(&ctx);
+        let global_body = compiler.module.body();
+        let mut env = Environment::new(&global_body);
+        compiler.compile_expr(&mut env, Expr::Literal(crate::ast::Value::Bool(true)));
+        assert!(compiler.module.as_operation().verify());
+        compiler.module.as_operation().dump();
     }
 }

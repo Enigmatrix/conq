@@ -47,7 +47,7 @@ pub struct Compiler<'a> {
 }
 
 impl<'c> Compiler<'c> {
-    fn new(ctx: &'c Context) -> Self {
+    pub fn new(ctx: &'c Context) -> Self {
         let loc = ir::Location::unknown(&ctx);
         let module = ir::Module::new(loc);
 
@@ -90,7 +90,7 @@ impl<'c> Compiler<'c> {
 
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::{io::Read, ops::Deref};
 
     use melior::{dialect::DialectRegistry, ir::{Block, Operation}, utility::{register_all_dialects, register_all_llvm_translations}};
@@ -99,14 +99,19 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_name() {
+    pub fn setup_ctx() -> Context {
         let registry = DialectRegistry::new();
         register_all_dialects(&registry);
         let ctx = Context::new();
         ctx.append_dialect_registry(&registry);
         ctx.load_all_available_dialects();
         register_all_llvm_translations(&ctx);
+        ctx
+    }
+
+    #[test]
+    fn test_name() {
+        let ctx = setup_ctx();
 
         let mut compiler = Compiler::new(&ctx);
         let blkref = compiler.module.body();
