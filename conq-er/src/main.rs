@@ -1,7 +1,7 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
 use gloo::utils::window;
-use gloo::{/* console::log, */events::EventListener};
+use gloo::{/* console::log, */ events::EventListener};
 use stylist::yew::{styled_component, Global};
 use web_sys::HtmlElement;
 use yew::prelude::*;
@@ -40,14 +40,41 @@ pub fn Editor() -> Html {
 pub fn Output() -> Html {
     html! {
         <div class={css!(r#"
-            background: #222;
-            padding: 15px;
-            box-sizing: border-box;
-            color: #f2f2f2;
-            height: 100%;
-            width: 100%;
-        "#)}>
-            <pre>{"test out please ignore"}</pre>
+                display: flex;
+                flex-direction: column;
+                color: #f2f2f2;
+                height: 100%;
+                width: 100%;
+            "#)}
+        >
+            <div class={css!(r#"
+                background: #444;
+                display: flex;
+                flex-direction: row;
+            "#)}>
+                <input type="button" value="Run"
+                    class={css!(r#"
+                        background: #222;
+                        color: #f2f2f2;
+                        font-weight: bold;
+                        border: none;
+                        padding: 10px;
+                        cursor: pointer;
+
+                        &:hover {
+                            background: #333;
+                        }
+                    "#)}
+                />
+            </div>
+            <div class={css!(r#"
+                background: #222;
+                padding: 10px;
+                box-sizing: border-box;
+                flex: 1;
+            "#)}>
+                <pre>{"test out please ignore"}</pre>
+            </div>
         </div>
     }
 }
@@ -106,18 +133,24 @@ pub fn LeftPane(
                 } else {
                     left_div
                         .style()
-                        .set_property( match axis {
-                            SplitAxis::Horizontal => "width",
-                            SplitAxis::Vertical => "height",
-                        }, &format!("{}px", left_width.unwrap()))
+                        .set_property(
+                            match axis {
+                                SplitAxis::Horizontal => "width",
+                                SplitAxis::Vertical => "height",
+                            },
+                            &format!("{}px", left_width.unwrap()),
+                        )
                         .unwrap();
-                    left_div.style().set_property(
-                        match axis {
-                            SplitAxis::Horizontal => "height",
-                            SplitAxis::Vertical => "width",
-                        },
-                        "unset",
-                    ).unwrap();
+                    left_div
+                        .style()
+                        .set_property(
+                            match axis {
+                                SplitAxis::Horizontal => "height",
+                                SplitAxis::Vertical => "width",
+                            },
+                            "unset",
+                        )
+                        .unwrap();
                 }
             }
             || {}
@@ -198,8 +231,7 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
                         SplitAxis::Horizontal => event.client_x(),
                         SplitAxis::Vertical => event.client_y(),
                     };
-                    let new_width =
-                        left_width.unwrap() + (drag_len - divider_x.unwrap());
+                    let new_width = left_width.unwrap() + (drag_len - divider_x.unwrap());
                     divider_x.set(Some(drag_len));
                     set_with_bounded.emit(new_width);
                 }
@@ -229,7 +261,8 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
                 }
                 left_width.set(None);
                 axis_ctx.set(new_axis);
-            }).forget();
+            })
+            .forget();
             || {}
         }
     });
