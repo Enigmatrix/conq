@@ -65,16 +65,17 @@ impl<'c> Compiler<'c> {
                 let before_region = {
                     let loc = self.loc.clone();
                     let region = ir::Region::new();
-                    let block = ir::Block::new(&[]);
+                    let block = region.append_block(ir::Block::new(&[]));
                     let mut env = env.extend(&block);
                     let val = self.compile_expr_block_optim(&mut env, *pred);
                     block.append_operation(scf::condition(val, &[], loc));
-                    region.append_block(block);
                     region
                 };
                 let after_region = {
                     let region = ir::Region::new();
                     let block = region.append_block(ir::Block::new(&[]));
+                    let mut env = env.extend(&block);
+                    let _val = self.compile_expr_block_optim(&mut env, *body);
                     block.append_operation(scf::r#yield(&[], self.loc));
                     region
                 };
@@ -90,11 +91,11 @@ impl<'c> Compiler<'c> {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
+    use std::{io::Read, ops::Deref};
 
-    use melior::{dialect::DialectRegistry, ir::{Block, Operation}, utility::register_all_dialects};
+    use melior::{dialect::DialectRegistry, ir::{Block, Operation}, utility::{register_all_dialects, register_all_llvm_translations}};
 
-    use crate::{ast::Value};
+    use crate::{ast::Value, translate};
 
     use super::*;
 
@@ -105,8 +106,9 @@ mod tests {
         let ctx = Context::new();
         ctx.append_dialect_registry(&registry);
         ctx.load_all_available_dialects();
+        register_all_llvm_translations(&ctx);
 
-        let compiler = Compiler::new(&ctx);
+        let mut compiler = Compiler::new(&ctx);
         let blkref = compiler.module.body();
         let mut env = Environment::new(&blkref);
         compiler.compile_stmt(&mut env, Stmt::While {
@@ -115,5 +117,11 @@ mod tests {
         });
         assert!(compiler.module.as_operation().verify());
         compiler.module.as_operation().dump();
+
+        let mut wasm_file = translate::compile_program(&ctx, &mut compiler.module).unwrap();
+        let mut wasm = String::new();
+        wasm_file.read_to_string(&mut wasm).unwrap();
+
+        eprintln!("{}", wasm);
     }
 }
