@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-use melior::{dialect::*, ir::{self, Block, Module, Region}, Context};
+use melior::{dialect::*, ir, Context};
 
 use crate::ast::{Expr, Stmt};
 
@@ -17,22 +17,20 @@ impl<'c, 'a> Frame<'c, 'a> {
 }
 
 pub struct Environment<'c, 'a> {
-    frames: Vec<Frame<'c, 'a>>,
+    frames: Vec<Arc<Frame<'c, 'a>>>,
 }
 
 impl<'c, 'a> Environment<'c, 'a> {
     pub fn new() -> Self {
         Self {
-            frames: vec![Frame::new()], // global frame
+            frames: vec![Arc::new(Frame::new())], // global frame
         }
     }
     
-    pub fn extend(&mut self) {
-        self.frames.push(Frame::new());
-    }
-    
-    pub fn pop(&mut self) {
-        self.frames.pop();
+    pub fn extend(&self) -> Self {
+        let mut frames = self.frames.clone();
+        frames.push(Arc::new(Frame::new()));
+        Self { frames }
     }
 }
 
@@ -50,15 +48,6 @@ impl<'c> Compiler<'c> {
         Self { ctx, loc, module }
     }
     
-    fn compile_expr_block_optim<'a>(&self, env: &mut Environment<'c, 'a>, block: &'a ir::Block<'c>, expr: Expr) {
-        match expr {
-            Expr::Body{ stmts, val } => {
-
-            },
-            expr => todo!(),
-        }
-    }
-    
     pub fn compile_stmt<'a>(&self, env: &mut Environment<'c, 'a>, block: &'a ir::Block<'c>, stmt: Stmt) {
         match stmt {
             Stmt::Expr(_) => todo!(),
@@ -71,9 +60,10 @@ impl<'c> Compiler<'c> {
                     let loc = self.loc.clone();
                     let region = ir::Region::new();
                     let block = ir::Block::new(&[]);
-                    let val = self.compile_expr(env, &block, *pred);
+                    let mut env = env.extend();
+                    let val = self.compile_expr_block_optim(&mut env, &block, *pred);
                     block.append_operation(scf::condition(val, &[], loc));
-                    let block = region.append_block(block);
+                    region.append_block(block);
                     region
                 };
                 let after_region = {

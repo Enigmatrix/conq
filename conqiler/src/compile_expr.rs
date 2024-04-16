@@ -1,7 +1,5 @@
-use std::any::Any;
-
-use melior::ir::{Block, TypeLike, ValueLike};
-use melior::{dialect::*, ir, Context};
+use melior::ir::ValueLike;
+use melior::{dialect::*, ir};
 use crate::compile::{Compiler, Environment};
 
 use crate::ast::{Expr, Ident, Stmt};
@@ -66,13 +64,26 @@ impl<'c> Compiler<'c> {
 
 
     pub fn compile_block<'a>(&self, env: &mut Environment<'c, 'a>, block: &'a ir::Block<'c>, stmts: Vec<Stmt>, expr: Expr) -> ir::Value<'c, 'a> {
-        env.extend();
+        let mut env = env.extend();
         for stmt in stmts {
-            self.compile_stmt(env, block, stmt);
+            self.compile_stmt(&mut env, block, stmt);
         }
-        let val = self.compile_expr(env, block, expr);
-        env.pop();
+        let val = self.compile_expr(&mut env, block, expr);
         val
+    }
+
+    pub fn compile_expr_block_optim<'a>(&self, env: &mut Environment<'c, 'a>, block: &'a ir::Block<'c>, expr: Expr) -> ir::Value<'c, 'a> {
+        match expr {
+            Expr::Body{ stmts, val } => {
+                // we aren't creating a new env here
+                for stmt in stmts {
+                    self.compile_stmt(env, block, stmt);
+                }
+                let val = self.compile_expr(env, block, *val);
+                val
+            },
+            expr => self.compile_expr(env, block, expr)
+        }
     }
     
     
