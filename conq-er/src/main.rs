@@ -2,6 +2,7 @@
 
 use gloo::utils::window;
 use gloo::{console::log, events::EventListener};
+use gloo_net::http::Request;
 use stylist::yew::{styled_component, Global};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::{closure::Closure, JsCast};
@@ -15,9 +16,7 @@ use monaco::{
     yew::{CodeEditor, CodeEditorLink},
 };
 
-mod execute;
 mod monaco_conq;
-use execute::execute;
 
 #[derive(Clone, PartialEq)]
 enum SplitAxis {
@@ -355,11 +354,24 @@ pub fn App() -> Html {
         let text_model = text_model.clone();
         let out = out.clone();
         Callback::from(move |_| {
-            let res = execute(text_model.get_value());
-            match res {
-                Ok(output) => out.set(output),
-                Err(e) => log!("Error: ", e.to_string()),
-            }
+            let text_model = text_model.clone();
+            let out = out.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let res = Request::post("/api/compile")
+                    .header("Content-Type", "text/plain")
+                    .body(text_model.get_value())
+                    .unwrap()
+                    .send()
+                    .await
+                    .unwrap();
+                match res.status() {
+                    200 =>  out.set(res.text().await.unwrap()),
+                    _ => {
+                        log!("Error: {}", res.text().await.unwrap());
+                        out.set("Error".to_string());
+                    }
+                }
+            });
         })
     };
 

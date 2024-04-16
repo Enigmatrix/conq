@@ -14,4 +14,6 @@ monaco = { git = "https://github.com/siku2/rust-monaco.git", features = ["yew-co
 stylist = { features = ["yew_integration"] }
 web-sys = { version = "0.3", features = ["HtmlElement", "CssStyleDeclaration"] }
 gloo = "0.11.0"
+gloo-net = "0.5"
+wasm-bindgen-futures = "0.4"
 js-sys = "0.3.68"
