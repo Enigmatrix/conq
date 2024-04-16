@@ -1,10 +1,22 @@
-use std::{error::Error, fs::File, io::Write, process::Command};
+use std::{error::Error, fs::File, io::Write, process::{Command, Output}};
 
 use melior::{
     pass::{self, PassManager},
     Context,
 };
 use tempfile::NamedTempFile;
+
+pub fn compile_program_text(
+    context: &melior::Context,
+    module: &mut melior::ir::Module,
+) -> Result<File, Box<dyn Error>> {
+    lower_to_llvm_dialect(&context, module)?;
+
+    let llir = module.as_operation().to_string();
+    let llvmir_file = convert_mlir_to_llvmir(&llir)?;
+    let wasm_file = convert_llvmir_to_wasm_text(llvmir_file)?;
+    Ok(wasm_file.into_file())
+}
 
 pub fn compile_program(
     context: &melior::Context,
@@ -16,6 +28,28 @@ pub fn compile_program(
     let llvmir_file = convert_mlir_to_llvmir(&llir)?;
     let wasm_file = convert_llvmir_to_wasm(llvmir_file)?;
     Ok(wasm_file.into_file())
+}
+
+pub fn compile_and_run_program(
+    context: &melior::Context,
+    module: &mut melior::ir::Module,
+) -> Result<Output, Box<dyn Error>> {
+    lower_to_llvm_dialect(&context, module)?;
+
+    let llir = module.as_operation().to_string();
+    let llvmir_file = convert_mlir_to_llvmir(&llir)?;
+    let wasm_file = convert_llvmir_to_wasm(llvmir_file)?;
+    // let output = Command::new("wasmtime")
+    //     .arg("--env")
+    //     .arg("__linear_memory=123")
+    //     .arg(wasm_file.path())
+    //     .output()?;
+    let output = Command::new("wasmer")
+        .arg("run")
+        .arg(wasm_file.path())
+        .arg(" --enable-all")
+        .output()?;
+    Ok(output)
 }
 
 pub fn lower_to_llvm_dialect(
@@ -78,10 +112,23 @@ pub fn convert_mlir_to_llvmir(s: &str) -> Result<NamedTempFile, Box<dyn Error>> 
     Ok(out)
 }
 
+pub fn convert_llvmir_to_wasm_text(inp: NamedTempFile) -> Result<NamedTempFile, Box<dyn Error>> {
+    let out = NamedTempFile::new()?;
+    let _output = Command::new("llc-17")
+        .arg("-filetype=asm")
+        .arg("-march=wasm32")
+        .arg(inp.path())
+        .arg("-o")
+        .arg(out.path())
+        .output()?;
+    Ok(out)
+}
+
 pub fn convert_llvmir_to_wasm(inp: NamedTempFile) -> Result<NamedTempFile, Box<dyn Error>> {
     let out = NamedTempFile::new()?;
     let _output = Command::new("llc-17")
-        .arg("--mtriple=wasm32")
+        .arg("-filetype=obj")
+        .arg("-march=wasm32")
         .arg(inp.path())
         .arg("-o")
         .arg(out.path())

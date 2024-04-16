@@ -6,7 +6,7 @@ use crate::compile::{Compiler, Environment};
 
 use crate::ast::{ArithBinaryOp, CompareBinaryOp, Expr, Ident, LogicalBinaryOp, Stmt};
 
-fn val<'a, 'i>(x: ir::OperationRef<'a, 'i>) -> ir::Value<'a, 'i> {
+pub fn val<'a, 'i>(x: ir::OperationRef<'a, 'i>) -> ir::Value<'a, 'i> {
     x.result(0)
         .unwrap_or_else(|_| panic!("this operation has no value: {x}"))
         .into()
@@ -14,7 +14,7 @@ fn val<'a, 'i>(x: ir::OperationRef<'a, 'i>) -> ir::Value<'a, 'i> {
 
 impl<'c> Compiler<'c> {
     
-    fn int_type(&self) -> ir::Type<'c> {
+    pub fn int_type(&self) -> ir::Type<'c> {
         ir::r#type::IntegerType::new(&self.ctx, 64).into()
     }
 

@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         location,
     ));
 
-    let mut wasm_file = translate::compile_program(&context, &mut module)?;
+    let mut wasm_file = translate::compile_program_text(&context, &mut module)?;
     let mut wasm = String::new();
     wasm_file.read_to_string(&mut wasm)?;
 
