@@ -6,12 +6,14 @@ use crate::ast::{Expr, Stmt};
 
 pub struct Frame<'c, 'a> {
     inner: HashMap<String, ir::Value<'c, 'a>>,
+    block: &'a ir::Block<'c>,
 }
 
 impl<'c, 'a> Frame<'c, 'a> {
-    pub fn new() -> Self {
+    pub fn new(block: &'a ir::Block<'c>) -> Self {
         Self {
             inner: HashMap::new(),
+            block
         }
     }
 }
@@ -21,16 +23,20 @@ pub struct Environment<'c, 'a> {
 }
 
 impl<'c, 'a> Environment<'c, 'a> {
-    pub fn new() -> Self {
+    pub fn new(block: &'a ir::Block<'c>) -> Self {
         Self {
-            frames: vec![Arc::new(Frame::new())], // global frame
+            frames: vec![Arc::new(Frame::new(block))], // global frame
         }
     }
     
-    pub fn extend(&self) -> Self {
+    pub fn extend<'a2: 'a>(&self, block: &'a2 ir::Block<'c>) -> Self {
         let mut frames = self.frames.clone();
-        frames.push(Arc::new(Frame::new()));
+        frames.push(Arc::new(Frame::new(block)));
         Self { frames }
+    }
+    
+    pub fn block(&self) -> &'a ir::Block<'c> {
+        self.frames.last().unwrap().block
     }
 }
 
@@ -48,7 +54,7 @@ impl<'c> Compiler<'c> {
         Self { ctx, loc, module }
     }
     
-    pub fn compile_stmt<'a>(&self, env: &mut Environment<'c, 'a>, block: &'a ir::Block<'c>, stmt: Stmt) {
+    pub fn compile_stmt<'a>(&self, env: &mut Environment<'c, 'a>, stmt: Stmt) {
         match stmt {
             Stmt::Expr(_) => todo!(),
             Stmt::Let { name, expr } => todo!(),
@@ -60,8 +66,8 @@ impl<'c> Compiler<'c> {
                     let loc = self.loc.clone();
                     let region = ir::Region::new();
                     let block = ir::Block::new(&[]);
-                    let mut env = env.extend();
-                    let val = self.compile_expr_block_optim(&mut env, &block, *pred);
+                    let mut env = env.extend(&block);
+                    let val = self.compile_expr_block_optim(&mut env, *pred);
                     block.append_operation(scf::condition(val, &[], loc));
                     region.append_block(block);
                     region
@@ -74,7 +80,7 @@ impl<'c> Compiler<'c> {
                 };
 
                 let whl = scf::r#while(&[], &[], before_region, after_region, self.loc);
-                block.append_operation(whl);
+                env.block().append_operation(whl);
             },
             Stmt::Fn { name, params, expr } => todo!(),
         }
@@ -102,8 +108,8 @@ mod tests {
 
         let compiler = Compiler::new(&ctx);
         let blkref = compiler.module.body();
-        let mut env = Environment::new();
-        compiler.compile_stmt(&mut env, &blkref, Stmt::While {
+        let mut env = Environment::new(&blkref);
+        compiler.compile_stmt(&mut env, Stmt::While {
             pred: Box::new(Expr::Unary{ op: crate::ast::UnaryOp::Not, expr: Box::new(Expr::Literal(Value::Bool(true)))}),
             body: Box::new(Expr::Body { stmts: vec![], val: Box::new(Expr::Literal(Value::Int(1))) }),
         });
