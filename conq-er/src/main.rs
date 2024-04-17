@@ -1,9 +1,12 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
-use gloo::utils::{format::JsValueSerdeExt, window};
+use std::result;
+
+use gloo::utils::window;
 use gloo::{console::log, events::EventListener};
 use gloo_net::http::Request;
-use js_sys::{Function, Map, Object, Reflect, WebAssembly, WebAssembly::Memory};
+use js_sys::{self, BigInt};
+use js_sys::{JSON::stringify, Function, Map, Object, Reflect, WebAssembly, WebAssembly::Memory};
 use stylist::yew::{styled_component, Global};
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use wasm_bindgen::prelude::*;
@@ -369,12 +372,17 @@ pub fn App() -> Html {
                 match res.status() {
                     200 => {
                         let binary = res.binary().await.unwrap();
-                        let result = execute(binary).await;
-                        out.set(JsValue::into_serde(&result).unwrap());
+                        let result = execute(binary).await.unwrap().into();
+                        let result = match stringify(&result) {
+                            Ok(s) => s.as_string().unwrap(),
+                            Err(_) => BigInt::new(&result).unwrap().to_string(10).unwrap().into(),
+                        };
+                        out.set(result);
                     }
                     _ => {
-                        log!("Error: {}", res.text().await.unwrap());
-                        out.set("Error".to_string());
+                        let err = format!("Error: {}", res.text().await.unwrap());
+                        log!("Error", &err);
+                        out.set(err);
                     }
                 }
             });
@@ -434,7 +442,7 @@ pub fn App() -> Html {
     }
 }
 
-async fn execute(binary: Vec<u8>) -> JsValue {
+async fn execute(binary: Vec<u8>) -> Result<JsValue, JsValue> {
     let result = JsFuture::from(WebAssembly::instantiate_buffer(
         &binary.as_slice(),
         &make_imports().unwrap(),
@@ -447,12 +455,13 @@ async fn execute(binary: Vec<u8>) -> JsValue {
         .unwrap();
     // let memory = Reflect::get(&instance.exports(), &"memory".into()).unwrap().dyn_into::<WebAssembly::Memory>().expect("memory export wasn't a `WebAssembly.Memory");
     // memory.grow(2);
-    log!("Instance: {:?}", &instance);
-    let run = Reflect::get(&instance.exports(), &"_start".into()) // TODO: Export Start
+    // log!("Instance", &instance);
+    let start = Reflect::get(&instance.exports(), &"_start".into()) // TODO: Export Start
         .unwrap()
         .dyn_into::<Function>()
         .expect("entrypoint function start not found");
-    run.call0(&JsValue::undefined()).unwrap()
+    start.call1(&JsValue::undefined(), &JsValue::bigint_from_str("0"))
+    // log!("Result", &res);
 }
 
 #[wasm_bindgen]
