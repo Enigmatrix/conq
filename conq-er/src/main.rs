@@ -1,15 +1,14 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
-use gloo::utils::format::JsValueSerdeExt;
-use gloo::utils::window;
+use gloo::utils::{format::JsValueSerdeExt, window};
 use gloo::{console::log, events::EventListener};
 use gloo_net::http::Request;
-use js_sys::{Object, Reflect, WebAssembly};
+use js_sys::{Function, Map, Object, Reflect, WebAssembly, WebAssembly::Memory};
 use stylist::yew::{styled_component, Global};
-use wasm_bindgen::JsValue;
-use wasm_bindgen::{closure::Closure, JsCast};
+use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{console, HtmlElement};
+use web_sys::HtmlElement;
 use yew::prelude::*;
 use yew_autoprops::autoprops;
 
@@ -368,15 +367,9 @@ pub fn App() -> Html {
                     .await
                     .unwrap();
                 match res.status() {
-                    200 =>  {
+                    200 => {
                         let binary = res.binary().await.unwrap();
-                        let result = JsFuture::from(WebAssembly::instantiate_buffer(&binary.as_slice(), &Object::new())).await.unwrap(); // TODO import WASI and others
-                        let instance: WebAssembly::Instance = Reflect::get(&result, &"instance".into()).unwrap().dyn_into().unwrap();
-                        // let memory = Reflect::get(&instance.exports(), &"memory".into()).unwrap().dyn_into::<WebAssembly::Memory>().expect("memory export wasn't a `WebAssembly.Memory");
-                        // memory.grow(2);
-                        let run = Reflect::get(&instance.exports(), &"_start".into()).unwrap().dyn_into::<js_sys::Function>().expect("entrypoint function start not found");
-                        let result = run.call0(&JsValue::undefined()).unwrap();
-                        log!("Result: {:?}", &result);
+                        let result = execute(binary).await;
                         out.set(JsValue::into_serde(&result).unwrap());
                     }
                     _ => {
@@ -439,6 +432,55 @@ pub fn App() -> Html {
             />
         </>
     }
+}
+
+async fn execute(binary: Vec<u8>) -> JsValue {
+    let result = JsFuture::from(WebAssembly::instantiate_buffer(
+        &binary.as_slice(),
+        &make_imports().unwrap(),
+    ))
+    .await
+    .unwrap();
+    let instance: WebAssembly::Instance = Reflect::get(&result, &"instance".into())
+        .unwrap()
+        .dyn_into()
+        .unwrap();
+    // let memory = Reflect::get(&instance.exports(), &"memory".into()).unwrap().dyn_into::<WebAssembly::Memory>().expect("memory export wasn't a `WebAssembly.Memory");
+    // memory.grow(2);
+    log!("Instance: {:?}", &instance);
+    let run = Reflect::get(&instance.exports(), &"_start".into()) // TODO: Export Start
+        .unwrap()
+        .dyn_into::<Function>()
+        .expect("entrypoint function start not found");
+    run.call0(&JsValue::undefined()).unwrap()
+}
+
+#[wasm_bindgen]
+pub struct Imports;
+
+fn bind(this: &JsValue, func_name: &str) -> Result<(), JsValue> {
+    let property_key = JsValue::from(func_name);
+    let orig_func = Reflect::get(this, &property_key)?.dyn_into::<Function>()?;
+    let func = orig_func.bind(this);
+    if !Reflect::set(this, &property_key, &func)? {
+        return Err(JsValue::from("failed to set property"));
+    }
+    Ok(())
+}
+
+pub fn make_imports() -> Result<Object, JsValue> {
+    let map = Map::new();
+    let imports: JsValue = Imports.into();
+
+    // bind(&imports, "__linear_memory")?;
+    let mem_descriptor = Object::new();
+    Reflect::set(&mem_descriptor, &JsValue::from("initial"), &JsValue::from(10)).unwrap();
+    Reflect::set(&mem_descriptor, &JsValue::from("maximum"), &JsValue::from(256)).unwrap();
+    let memory = &Memory::new(&mem_descriptor).unwrap();
+    Reflect::set(&imports,&JsValue::from("__linear_memory"), &memory).unwrap();
+
+    map.set(&JsValue::from("env"), &imports);
+    Object::from_entries(&map.into())
 }
 
 fn main() {

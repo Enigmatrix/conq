@@ -22,7 +22,7 @@ async fn echo(
         (&Method::POST, "/api/echo") => Ok(Response::new(req.into_body().boxed())),
 
         (&Method::POST, "/api/sample") => {
-            let mut f = File::open("test-server/static/hello.wasm").await.unwrap();
+            let mut f = File::open("test-server/static/wtf.wasm").await.unwrap();
             if f.metadata().await.unwrap().len() > 1024 * 16 {
                 return Ok(Response::builder()
                     .status(StatusCode::PAYLOAD_TOO_LARGE)
