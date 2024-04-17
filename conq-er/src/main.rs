@@ -1,12 +1,15 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
+use gloo::utils::format::JsValueSerdeExt;
 use gloo::utils::window;
 use gloo::{console::log, events::EventListener};
 use gloo_net::http::Request;
+use js_sys::{Object, Reflect, WebAssembly};
 use stylist::yew::{styled_component, Global};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::{closure::Closure, JsCast};
-use web_sys::HtmlElement;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{console, HtmlElement};
 use yew::prelude::*;
 use yew_autoprops::autoprops;
 
@@ -357,7 +360,7 @@ pub fn App() -> Html {
             let text_model = text_model.clone();
             let out = out.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let res = Request::post("/api/compile")
+                let res = Request::post("/api/sample")
                     .header("Content-Type", "text/plain")
                     .body(text_model.get_value())
                     .unwrap()
@@ -365,7 +368,17 @@ pub fn App() -> Html {
                     .await
                     .unwrap();
                 match res.status() {
-                    200 =>  out.set(res.text().await.unwrap()),
+                    200 =>  {
+                        let binary = res.binary().await.unwrap();
+                        let result = JsFuture::from(WebAssembly::instantiate_buffer(&binary.as_slice(), &Object::new())).await.unwrap(); // TODO import WASI and others
+                        let instance: WebAssembly::Instance = Reflect::get(&result, &"instance".into()).unwrap().dyn_into().unwrap();
+                        // let memory = Reflect::get(&instance.exports(), &"memory".into()).unwrap().dyn_into::<WebAssembly::Memory>().expect("memory export wasn't a `WebAssembly.Memory");
+                        // memory.grow(2);
+                        let run = Reflect::get(&instance.exports(), &"_start".into()).unwrap().dyn_into::<js_sys::Function>().expect("entrypoint function start not found");
+                        let result = run.call0(&JsValue::undefined()).unwrap();
+                        log!("Result: {:?}", &result);
+                        out.set(JsValue::into_serde(&result).unwrap());
+                    }
                     _ => {
                         log!("Error: {}", res.text().await.unwrap());
                         out.set("Error".to_string());

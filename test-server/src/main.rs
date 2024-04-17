@@ -1,12 +1,16 @@
 use std::net::SocketAddr;
 
+use http_body_util::Full;
 use http_body_util::{combinators::BoxBody, BodyExt, Empty};
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
+
 
 /// This is our service handler. It receives a Request, routes on its
 /// path, and returns a Future of a Response.
@@ -15,7 +19,23 @@ async fn echo(
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     match (req.method(), req.uri().path()) {
         // Simply echo the body back to the client.
-        (&Method::POST, "/api/compile") => Ok(Response::new(req.into_body().boxed())),
+        (&Method::POST, "/api/echo") => Ok(Response::new(req.into_body().boxed())),
+
+        (&Method::POST, "/api/sample") => {
+            let mut f = File::open("test-server/static/hello.wasm").await.unwrap();
+            if f.metadata().await.unwrap().len() > 1024 * 16 {
+                return Ok(Response::builder()
+                    .status(StatusCode::PAYLOAD_TOO_LARGE)
+                    .body(full("File too large"))
+                    .unwrap());
+            }
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).await.unwrap();
+            Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(full(buf))
+                .unwrap())
+        }
 
         // Return the 404 Not Found for other routes.
         _ => {
@@ -28,6 +48,12 @@ async fn echo(
 
 fn empty() -> BoxBody<Bytes, hyper::Error> {
     Empty::<Bytes>::new()
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
+    Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed()
 }

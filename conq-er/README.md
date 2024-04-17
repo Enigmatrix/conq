@@ -20,7 +20,7 @@ To get started with Conq-er, follow these steps:
 1. Clone the parent repository: `git clone https://github.com/Enigmatrix/conq/ && cd conq`
 2. Install the necessary dependencies: `cargo build`
 3. Run the server: `cargo run --bin test-server`
-4. Run the client: `trunk serve --open conq-er/index.html --proxy-backend=http://localhost:7878/api/compile`.
+4. Run the client: `trunk serve --open conq-er/index.html`.
 
 ## License
 
