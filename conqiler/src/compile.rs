@@ -48,6 +48,15 @@ impl<'c, 'a> Environment<'c, 'a> {
         // this is safe since only the last block (which has no other owners) is being mutated
         Rc::get_mut(rc).unwrap().deref_mut().decl(name, val)
     }
+
+    pub fn get(&self, name: String) -> Option<&ir::Value<'c, 'a>> {
+        for frame in self.frames.iter().rev() {
+            if let Some(val) = frame.inner.get(&name) {
+                return Some(val);
+            }
+        }
+        return None;
+    }
 }
 
 pub struct Compiler<'a> {
@@ -70,20 +79,21 @@ impl<'c> Compiler<'c> {
                 let _ = self.compile_expr(env, expr);
             },
             Stmt::Let { name: Ident(name), expr } => {
-                let v = self.compile_expr(env, *expr);
-                let alloca = memref::alloca(&self.ctx, MemRefType::new(v.r#type(), &[], None, None), &[], &[], None, self.loc);
-                let alloc_v = val(env.block().append_operation(alloca));
-                if !env.decl(name.clone(), alloc_v) {
+                let v = self.compile_expr_val(env, *expr);
+
+                if !env.decl(name.clone(), v) {
                     panic!("redeclared variable {name}");
                 }
-                let store_v = memref::store(v, alloc_v, &[], self.loc);
-                env.block().append_operation(store_v);
             },
             Stmt::Break => todo!(),
             Stmt::Continue => todo!(),
             Stmt::Return(expr) => {
                 let v = self.compile_expr(env, *expr);
-                env.block().append_operation(func::r#return(&[v], self.loc));
+                if let Some(v) = v {
+                    env.block().append_operation(func::r#return(&[v], self.loc));
+                } else {
+                    env.block().append_operation(func::r#return(&[], self.loc));
+                }
             },
             Stmt::While { pred, body } => {
                 let before_region = {
@@ -92,7 +102,7 @@ impl<'c> Compiler<'c> {
                     let block = region.append_block(ir::Block::new(&[]));
                     let mut env = env.extend(&block);
                     let val = self.compile_expr_block_optim(&mut env, *pred);
-                    block.append_operation(scf::condition(val, &[], loc));
+                    block.append_operation(scf::condition(val.expect("a value is returned"), &[], loc));
                     region
                 };
                 let after_region = {
@@ -108,12 +118,12 @@ impl<'c> Compiler<'c> {
                 env.block().append_operation(whl);
             },
             Stmt::Fn { name: Ident(name), params, expr } => {
-                let arg_types = params.iter().map(|_| self.int_type()).collect::<Vec<_>>();
+                let arg_types = params.iter().map(|_| self.int_ref_type()).collect::<Vec<_>>();
                 let arg_types_with_loc = arg_types.iter().cloned().map(|t| (t, self.loc)).collect::<Vec<_>>();
 
                 // TODO currently only int params
                 // TODO currently int return (not even void)
-                let fn_type = ir::attribute::TypeAttribute::new(ir::r#type::FunctionType::new(&self.ctx, &arg_types, &[self.int_type()]).into());
+                let fn_type = ir::attribute::TypeAttribute::new(ir::r#type::FunctionType::new(&self.ctx, &arg_types, &[self.int_ref_type()]).into());
                 let fn_attr = ir::attribute::StringAttribute::new(&self.ctx, &name.clone());
                 let fn_op = func::func(&self.ctx, fn_attr, fn_type, {
                     let region = ir::Region::new();
@@ -129,7 +139,7 @@ impl<'c> Compiler<'c> {
                     }
                     let val = self.compile_expr_block_optim(&mut env, *expr);
                     // TODO temporary return
-                    block.append_operation(func::r#return(&[val], self.loc));
+                    // block.append_operation(func::r#return(&[val], self.loc));
                     region
                 }, &[], self.loc);
                 env.block().append_operation(fn_op);
@@ -145,7 +155,7 @@ pub mod tests {
 
     use melior::{dialect::DialectRegistry, ir::{Block, Operation}, utility::{register_all_dialects, register_all_llvm_translations}};
 
-    use crate::{ast::Value, translate};
+    use crate::{ast::Value, parser::parse, translate};
 
     use super::*;
 
@@ -168,7 +178,7 @@ pub mod tests {
         let mut env = Environment::new(&blkref);
         compiler.compile_stmt(&mut env, Stmt::While {
             pred: Box::new(Expr::Unary{ op: crate::ast::UnaryOp::Not, expr: Box::new(Expr::Literal(Value::Bool(true)))}),
-            body: Box::new(Expr::Body { stmts: vec![], val: Box::new(Some(Expr::Literal(Value::Int(1)))) }),
+            body: Box::new(Expr::Body { stmts: vec![], val: Box::new(Expr::Literal(Value::Int(1))) }),
         });
         assert!(compiler.module.as_operation().verify());
         compiler.module.as_operation().dump();
@@ -190,7 +200,7 @@ pub mod tests {
         let mut env = Environment::new(&blkref);
         let let_a = Stmt::Let { name: Ident("a".to_string()), expr: Box::new(Expr::Literal(Value::Int(1))) };
         let ret_32 = Stmt::Return(Box::new(Expr::Literal(Value::Int(32))));
-        compiler.compile_stmt(&mut env,  Stmt::Fn { name: Ident("_start".to_string()), params: vec![Ident("b".to_string())], expr: Box::new(Expr::Body { stmts: vec![let_a, ret_32], val: None }) });
+        compiler.compile_stmt(&mut env,  Stmt::Fn { name: Ident("_start".to_string()), params: vec![Ident("b".to_string())], expr: Box::new(Expr::Body { stmts: vec![let_a, ret_32], val: Box::new(Expr::Literal(Value::Void)) }) });
         assert!(compiler.module.as_operation().verify());
         compiler.module.as_operation().dump();
 
@@ -203,4 +213,42 @@ pub mod tests {
         let mut output = translate::compile_and_run_program(&ctx, &mut compiler.module).unwrap();
         eprintln!("{:?}", output);
     }
+
+    #[test]
+    fn test_decl_int2() {
+        let ctx = setup_ctx();
+
+        let mut compiler = Compiler::new(&ctx);
+        let blkref = compiler.module.body();
+        let mut env = Environment::new(&blkref);
+        let ast = parse(
+                r#"
+                fn add(a, b) {
+                    let c = 1;
+                    return c + a + b;
+                }
+                // fn _start() {
+                    // return add(2, 3);
+                // }
+            "#
+            );
+        eprintln!("{:?}", ast);
+        if let crate::ast::Ast::Stmt(stmt) = ast {
+            compiler.compile_stmt(&mut env, stmt);
+        }
+        else if let crate::ast::Ast::Expr(expr) = ast {
+            compiler.compile_expr(&mut env, expr);
+        }
+        assert!(compiler.module.as_operation().verify());
+        compiler.module.as_operation().dump();
+
+        let mut output = translate::compile_program_text(&ctx, &mut compiler.module).unwrap();
+        let mut o = String::new();
+        output.read_to_string(&mut o).unwrap();
+
+        eprintln!("{}", o);
+        let mut output = translate::compile_and_run_program(&ctx, &mut compiler.module).unwrap();
+        eprintln!("{:?}", output);
+    }
+
 }
