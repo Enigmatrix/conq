@@ -118,8 +118,9 @@ impl<'c> Compiler<'c> {
                     let block = region.append_block(ir::Block::new(&[]));
                     let mut env = env.extend(&block);
                     let val = self.compile_expr_block_optim(&mut env, *pred);
+                    let val = self.load(&mut env, val.expect("a value is returned"));
                     block.append_operation(scf::condition(
-                        val.expect("a value is returned"),
+                        val,
                         &[],
                         loc,
                     ));
