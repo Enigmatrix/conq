@@ -39,15 +39,16 @@ pub fn compile_and_run_program(
     let llir = module.as_operation().to_string();
     let llvmir_file = convert_mlir_to_llvmir(&llir)?;
     let wasm_file = convert_llvmir_to_wasm(llvmir_file)?;
-    // let output = Command::new("wasmtime")
-    //     .arg("--env")
-    //     .arg("__linear_memory=123")
-    //     .arg(wasm_file.path())
-    //     .output()?;
+    let linked_wasm_file = NamedTempFile::new()?;
+    let output = Command::new("wasm-ld-17")
+        .arg(wasm_file.path())
+        .arg("-o")
+        .arg(linked_wasm_file.path())
+        .output()?;
+    eprintln!("{:?}", output);
     let output = Command::new("wasmer")
         .arg("run")
-        .arg(wasm_file.path())
-        .arg(" --enable-all")
+        .arg(linked_wasm_file.path())
         .output()?;
     Ok(output)
 }
