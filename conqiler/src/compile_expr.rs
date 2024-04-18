@@ -43,7 +43,7 @@ impl<'c> Compiler<'c> {
     }
     
     pub fn alloc<'a>(&self, env: &mut Environment<'c, 'a>, inner_typ: ir::Type<'c>) -> ir::Value<'c, 'a> {
-        let alloca = memref::alloca(&self.ctx, ir::r#type::MemRefType::new(inner_typ, &[], None, None), &[], &[], None, self.loc);
+        let alloca = memref::alloc(&self.ctx, ir::r#type::MemRefType::new(inner_typ, &[], None, None), &[], &[], None, self.loc);
         val(env.block().append_operation(alloca))
     }
     
@@ -183,6 +183,32 @@ impl<'c> Compiler<'c> {
         }));
         self.alloc_and_store(env, v, self.bool_type())
     }
+
+    pub fn compile_apply<'a>(&self, env: &mut Environment<'c, 'a>, r#fn: Expr, args: Vec<Expr>) -> Option<ir::Value<'c, 'a>> {
+        let fn_val = self.compile_expr_val(env, r#fn);
+        // eprintln!("fn_val: {fn_val}");
+        let ctx = self.ctx;
+        let b = env.block();
+        let global = self.module.body();
+        let global_region = global.parent_region();
+        eprintln!("block: {b}, g: {global}, gr: {global_region:?}\n");
+        
+        // let fn_type = ir::r#type::FunctionType::new(ctx, &[self.int_ref_type(), self.int_ref_type()], &[self.int_ref_type()]);
+        // let add = ir::attribute::FlatSymbolRefAttribute::new(ctx, "add");
+        // eprintln!(", opadd: {add}");
+        // eprintln!(", fntype: {fn_type}");
+        // let op = func::constant(ctx, add, fn_type, self.loc);
+        // //eprintln!(", op: {op}");
+        // let fn_val = val(env.block().append_operation(op.clone()));
+        //eprintln!(", op: {op}");
+        //eprintln!("fn_val: {fn_val}, op: {op}");
+        let args = args.into_iter().map(|arg| self.compile_expr_val(env, arg)).collect::<Vec<_>>();
+        // TODO add assert
+        // TODO check number of args
+        let v = val(env.block().append_operation(func::call_indirect(fn_val, &args, &[self.int_ref_type()], self.loc)));
+        // let v = val(env.block().append_operation(func::call(self.ctx, add, &args, &[self.int_ref_type()], self.loc)));
+        Some(v)
+    }
     
     pub fn compile_expr_val<'a>(&self, env: &mut Environment<'c, 'a>, expr: Expr) -> ir::Value<'c, 'a> {
         return self.compile_expr(env, expr).expect("expr value expected");
@@ -223,9 +249,10 @@ impl<'c> Compiler<'c> {
                     panic!("unknown variable {name}");
                 }
             },
+            // TODO create a completely new block for this -_-
             Expr::Body{ stmts, val } => self.compile_block(env, env.block(), stmts, *val),
             Expr::Cond{ pred, conseq, alt } => todo!(),
-            Expr::Apply { r#fn, args } => todo!(),
+            Expr::Apply { r#fn, args } => self.compile_apply(env, *r#fn, args),
         }
     }
 }

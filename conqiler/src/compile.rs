@@ -1,8 +1,14 @@
-use std::{borrow::BorrowMut, cell::RefCell, collections::HashMap, ops::DerefMut, rc::Rc, sync::Arc};
+use core::panic;
+use std::{collections::HashMap, ops::DerefMut, rc::Rc};
 
-use melior::{dialect::*, ir::{self, block, r#type::MemRefType, ValueLike}, Context};
+use melior::{dialect::*, ir, Context};
 
 use crate::{ast::{Expr, Ident, Stmt}, compile_expr::val};
+
+enum NameValue<'c, 'a> {
+    Value(ir::Value<'c, 'a>),
+    Function(String)
+}
 
 pub struct Frame<'c, 'a> {
     inner: HashMap<String, ir::Value<'c, 'a>>,
@@ -120,14 +126,15 @@ impl<'c> Compiler<'c> {
             Stmt::Fn { name: Ident(name), params, expr } => {
                 let arg_types = params.iter().map(|_| self.int_ref_type()).collect::<Vec<_>>();
                 let arg_types_with_loc = arg_types.iter().cloned().map(|t| (t, self.loc)).collect::<Vec<_>>();
+                let ret_type = self.int_ref_type();
 
                 // TODO currently only int params
                 // TODO currently int return (not even void)
-                let fn_type = ir::attribute::TypeAttribute::new(ir::r#type::FunctionType::new(&self.ctx, &arg_types, &[self.int_ref_type()]).into());
+                let fn_type = ir::attribute::TypeAttribute::new(ir::r#type::FunctionType::new(&self.ctx, &arg_types, &[ret_type]).into());
                 let fn_attr = ir::attribute::StringAttribute::new(&self.ctx, &name.clone());
                 let fn_op = func::func(&self.ctx, fn_attr, fn_type, {
                     let region = ir::Region::new();
-                    let block = region.append_block(ir::Block::new(&arg_types_with_loc));
+                    let block = ir::Block::new(&arg_types_with_loc);
                     let mut env = env.extend(&block);
                     let mut i = 0;
                     for Ident(p) in params {
@@ -137,12 +144,17 @@ impl<'c> Compiler<'c> {
                         }
                         i+=1;
                     }
-                    let val = self.compile_expr_block_optim(&mut env, *expr);
-                    // TODO temporary return
-                    // block.append_operation(func::r#return(&[val], self.loc));
+                    let _val = self.compile_expr_block_optim(&mut env, *expr);
+                    let block = region.append_block(block);
                     region
                 }, &[], self.loc);
                 env.block().append_operation(fn_op);
+                let fn_type = ir::r#type::FunctionType::new(&self.ctx, &arg_types, &[ret_type]);
+                let fn_cnst = func::constant(&self.ctx, ir::attribute::FlatSymbolRefAttribute::new(&self.ctx, &name), fn_type, self.loc);
+                let fn_val = val(env.block().append_operation(fn_cnst));
+                if !env.decl(name.clone(), fn_val) {
+                    panic!("redeclared function {name}");
+                }
             },
         }
     }
@@ -227,9 +239,9 @@ pub mod tests {
                     let c = 1;
                     return c + a + b;
                 }
-                // fn _start() {
-                    // return add(2, 3);
-                // }
+                 fn _start() {
+                     return add(2, 3);
+                }
             "#
             );
         eprintln!("{:?}", ast);
