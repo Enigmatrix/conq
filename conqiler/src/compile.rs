@@ -5,13 +5,13 @@ use melior::{dialect::*, ir, Context};
 
 use crate::{ast::{Expr, Ident, Stmt}, compile_expr::val};
 
-enum NameValue<'c, 'a> {
+pub enum NameValue<'c, 'a> {
     Value(ir::Value<'c, 'a>),
-    Function(String)
+    Function { name: String, inputs: Vec<ir::Type<'c>>, outputs: Vec<ir::Type<'c>> },
 }
 
 pub struct Frame<'c, 'a> {
-    inner: HashMap<String, ir::Value<'c, 'a>>,
+    inner: HashMap<String, NameValue<'c, 'a>>,
     block: &'a ir::Block<'c>,
 }
 
@@ -23,7 +23,7 @@ impl<'c, 'a> Frame<'c, 'a> {
         }
     }
 
-    pub fn decl(&mut self, name: String, val: ir::Value<'c, 'a>) -> bool {
+    pub fn decl(&mut self, name: String, val: NameValue<'c, 'a>) -> bool {
         self.inner.insert(name, val).is_none()
     }
 }
@@ -49,13 +49,13 @@ impl<'c, 'a> Environment<'c, 'a> {
         self.frames.last().unwrap().block
     }
 
-    pub fn decl(&mut self, name: String, val: ir::Value<'c, 'a>) -> bool {
+    pub fn decl(&mut self, name: String, val: NameValue<'c, 'a>) -> bool {
         let rc = self.frames.last_mut().unwrap();
         // this is safe since only the last block (which has no other owners) is being mutated
         Rc::get_mut(rc).unwrap().deref_mut().decl(name, val)
     }
 
-    pub fn get(&self, name: String) -> Option<&ir::Value<'c, 'a>> {
+    pub fn get(&self, name: String) -> Option<&NameValue<'c, 'a>> {
         for frame in self.frames.iter().rev() {
             if let Some(val) = frame.inner.get(&name) {
                 return Some(val);
@@ -87,7 +87,7 @@ impl<'c> Compiler<'c> {
             Stmt::Let { name: Ident(name), expr } => {
                 let v = self.compile_expr_val(env, *expr);
 
-                if !env.decl(name.clone(), v) {
+                if !env.decl(name.clone(), NameValue::Value(v)) {
                     panic!("redeclared variable {name}");
                 }
             },
@@ -139,7 +139,7 @@ impl<'c> Compiler<'c> {
                     let mut i = 0;
                     for Ident(p) in params {
                         let v = block.argument(i).unwrap().into();
-                        if !env.decl(p.clone(), v) {
+                        if !env.decl(p.clone(), NameValue::Value(v)) {
                             panic!("redeclared argument {p}");
                         }
                         i+=1;
@@ -149,10 +149,7 @@ impl<'c> Compiler<'c> {
                     region
                 }, &[], self.loc);
                 env.block().append_operation(fn_op);
-                let fn_type = ir::r#type::FunctionType::new(&self.ctx, &arg_types, &[ret_type]);
-                let fn_cnst = func::constant(&self.ctx, ir::attribute::FlatSymbolRefAttribute::new(&self.ctx, &name), fn_type, self.loc);
-                let fn_val = val(env.block().append_operation(fn_cnst));
-                if !env.decl(name.clone(), fn_val) {
+                if !env.decl(name.clone(), NameValue::Function { name: name.clone(), inputs: arg_types, outputs: vec![ret_type]} ) {
                     panic!("redeclared function {name}");
                 }
             },

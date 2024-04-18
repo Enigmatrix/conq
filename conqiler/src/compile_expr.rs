@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 
 use melior::ir::{block, ValueLike};
 use melior::{dialect::*, ir};
-use crate::compile::{Compiler, Environment};
+use crate::compile::{Compiler, Environment, NameValue};
 
 use crate::ast::{ArithBinaryOp, CompareBinaryOp, Expr, Ident, LogicalBinaryOp, Stmt, Value};
 
@@ -187,11 +187,6 @@ impl<'c> Compiler<'c> {
     pub fn compile_apply<'a>(&self, env: &mut Environment<'c, 'a>, r#fn: Expr, args: Vec<Expr>) -> Option<ir::Value<'c, 'a>> {
         let fn_val = self.compile_expr_val(env, r#fn);
         // eprintln!("fn_val: {fn_val}");
-        let ctx = self.ctx;
-        let b = env.block();
-        let global = self.module.body();
-        let global_region = global.parent_region();
-        eprintln!("block: {b}, g: {global}, gr: {global_region:?}\n");
         
         // let fn_type = ir::r#type::FunctionType::new(ctx, &[self.int_ref_type(), self.int_ref_type()], &[self.int_ref_type()]);
         // let add = ir::attribute::FlatSymbolRefAttribute::new(ctx, "add");
@@ -234,17 +229,31 @@ impl<'c> Compiler<'c> {
             Expr::Ident(Ident(name)) => {
                 let v = env.get(name.clone());
                 if let Some(v) = v {
-                    Some(v.clone())
+                    match v {
+                        NameValue::Value(v) => Some(v.clone()),
+                        NameValue::Function { name, inputs, outputs } => {
+                            let fn_type = ir::r#type::FunctionType::new(&self.ctx, &inputs, &outputs);
+                            let fn_ref = ir::attribute::FlatSymbolRefAttribute::new(&self.ctx, name);
+                            let op = func::constant(&self.ctx, fn_ref, fn_type, self.loc);
+                            let fn_val = val(env.block().append_operation(op.clone()));
+                            Some(fn_val)
+                        },
+                    }
                 } else {
                     panic!("unknown variable {name}");
                 }
             },
             Expr::Assign { name: Ident(name), expr } => {
                 let expr_value = self.compile_expr_val(env, *expr);
-                let v = env.get(name.clone()).cloned();
+                let v = env.get(name.clone());
                 if let Some(v) = v {
-                    self.store(env, v.clone(), expr_value);
-                    Some(v.clone())
+                    if let NameValue::Value(v) = v {
+                        let v = v.clone();
+                        self.store(env, v, expr_value);
+                        Some(v.clone())
+                    } else {
+                        panic!("not a variable {name}");
+                    }
                 } else {
                     panic!("unknown variable {name}");
                 }
