@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use crate::compile::{Compiler, Environment, NameValue};
-use melior::ir::{block, ValueLike};
+use melior::ir::{block, Block, Type, ValueLike};
 use melior::{dialect::*, ir};
 
 use crate::ast::{ArithBinaryOp, CompareBinaryOp, Expr, Ident, LogicalBinaryOp, Stmt, Value};
@@ -240,7 +240,7 @@ impl<'c> Compiler<'c> {
                 arith::cmpi(&self.ctx, arith::CmpiPredicate::Ne, lhs, rhs, self.loc)
             }
         }));
-        self.alloc_and_store(env, v, self.int_type())
+        self.alloc_and_store(env, v, self.bool_type())
     }
 
     pub fn compile_logical_binary<'a>(
@@ -262,6 +262,56 @@ impl<'c> Compiler<'c> {
             // TODO Xor
         }));
         self.alloc_and_store(env, v, self.bool_type())
+    }
+
+    pub fn compile_cond<'a>(
+        &self,
+        env: &mut Environment<'c, 'a>,
+        pred: Expr,
+        conseq: Expr,
+        alt: Expr,
+    ) -> Option<ir::Value<'c, 'a>> {
+        let cond = self.compile_expr_val(env, pred);
+        let cond = self.load(env, cond);
+        let mut typ = None;
+        
+        let (then_region, else_region) = {
+            let then_region = ir::Region::new();
+            let then_block = then_region.append_block(ir::Block::new(&[]));
+            let mut then_env = env.extend(&then_block);
+            let then_val = self.compile_expr_block_optim(&mut then_env, conseq);
+            let then_type = then_val.map(|v| v.r#type());
+            if let Some(then_val) = then_val {
+                then_block.append_operation(scf::r#yield(&[then_val], self.loc));
+            } else {
+                then_block.append_operation(scf::r#yield(&[], self.loc));
+            }
+
+            let else_region = ir::Region::new();
+            let else_block = else_region.append_block(ir::Block::new(&[]));
+            let mut else_env = env.extend(&else_block);
+            let else_val = self.compile_expr_block_optim(&mut else_env, alt);
+            let else_type = else_val.map(|v| v.r#type());
+            if let Some(else_val) = else_val {
+                else_block.append_operation(scf::r#yield(&[else_val], self.loc));
+            } else {
+                else_block.append_operation(scf::r#yield(&[], self.loc));
+            }
+            
+
+            if then_type != else_type {
+                panic!("conditional branches have different type")
+            }
+            typ = then_type.map(|a| a.to_string());
+            (then_region, else_region)
+        };
+
+        let ret_types = typ.map(|s| Type::parse(&self.ctx, &s).unwrap()).into_iter().collect::<Vec<_>>();
+        let ifop = env.block().append_operation(scf::r#if(cond, &ret_types, then_region, else_region, self.loc));
+        if ret_types.is_empty() {
+            return None;
+        }
+        Some(val(ifop))
     }
 
     pub fn compile_apply<'a>(
@@ -365,6 +415,7 @@ impl<'c> Compiler<'c> {
                 if let Some(v) = v {
                     if let NameValue::Value(v) = v {
                         let v = v.clone();
+                        let expr_value = self.load(env, expr_value);
                         self.store(env, v, expr_value);
                         Some(v.clone())
                     } else {
@@ -376,7 +427,7 @@ impl<'c> Compiler<'c> {
             }
             // TODO create a completely new block for this -_-
             Expr::Body { stmts, val } => self.compile_block(env, env.block(), stmts, *val),
-            Expr::Cond { pred, conseq, alt } => todo!(),
+            Expr::Cond { pred, conseq, alt } => self.compile_cond(env, *pred, *conseq, *alt),
             Expr::Apply { r#fn, args } => self.compile_apply(env, *r#fn, args),
         }
     }

@@ -322,4 +322,41 @@ pub mod tests {
         let mut output = translate::compile_and_run_program(&ctx, &mut compiler.module).unwrap();
         eprintln!("{:?}", output);
     }
+
+    #[test]
+    fn test_if() {
+        let ctx = setup_ctx();
+
+        let mut compiler = Compiler::new(&ctx);
+        let blkref = compiler.module.body();
+        let mut env = Environment::new(&blkref);
+        let ast = parse(
+            r#"
+                 fn _start() {
+                    let a = 2;
+                    let b = 3;
+                    b = 5;
+                    let c = a == 2;
+                    if a == 2 { b = 45; } else { b = 67; };
+                    return b;
+                }
+            "#,
+        );
+        eprintln!("{:?}", ast);
+        if let crate::ast::Ast::Stmt(stmt) = ast {
+            compiler.compile_stmt(&mut env, stmt);
+        } else if let crate::ast::Ast::Expr(expr) = ast {
+            compiler.compile_expr(&mut env, expr);
+        }
+        compiler.module.as_operation().dump();
+        assert!(compiler.module.as_operation().verify());
+
+        let mut output = translate::compile_program_text(&ctx, &mut compiler.module).unwrap();
+        let mut o = String::new();
+        output.read_to_string(&mut o).unwrap();
+
+        eprintln!("{}", o);
+        let mut output = translate::compile_and_run_program(&ctx, &mut compiler.module).unwrap();
+        eprintln!("{:?}", output);
+    }
 }
