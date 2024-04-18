@@ -1,4 +1,3 @@
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum Ast {
     Stmt(Stmt),
@@ -49,7 +48,7 @@ pub enum Value {
     /*Float(f64),*/
     Bool(bool),
     String(String),
-    Void
+    Void,
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash, Ord)]

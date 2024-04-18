@@ -1,7 +1,4 @@
-use std::{
-    error::Error,
-    io::Read
-};
+use std::{error::Error, io::Read};
 
 use melior::{
     dialect::{arith, func, DialectRegistry},
@@ -15,10 +12,10 @@ use melior::{
 };
 
 mod ast;
-mod parser;
-mod translate;
 mod compile;
 mod compile_expr;
+mod parser;
+mod translate;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let registry = DialectRegistry::new();

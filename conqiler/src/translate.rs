@@ -1,4 +1,9 @@
-use std::{error::Error, fs::File, io::Write, process::{Command, Output}};
+use std::{
+    error::Error,
+    fs::File,
+    io::Write,
+    process::{Command, Output},
+};
 
 use melior::{
     pass::{self, PassManager},

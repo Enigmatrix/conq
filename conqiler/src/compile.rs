@@ -3,11 +3,18 @@ use std::{collections::HashMap, ops::DerefMut, rc::Rc};
 
 use melior::{dialect::*, ir, Context};
 
-use crate::{ast::{Expr, Ident, Stmt}, compile_expr::val};
+use crate::{
+    ast::{Expr, Ident, Stmt},
+    compile_expr::val,
+};
 
 pub enum NameValue<'c, 'a> {
     Value(ir::Value<'c, 'a>),
-    Function { name: String, inputs: Vec<ir::Type<'c>>, outputs: Vec<ir::Type<'c>> },
+    Function {
+        name: String,
+        inputs: Vec<ir::Type<'c>>,
+        outputs: Vec<ir::Type<'c>>,
+    },
 }
 
 pub struct Frame<'c, 'a> {
@@ -19,7 +26,7 @@ impl<'c, 'a> Frame<'c, 'a> {
     pub fn new(block: &'a ir::Block<'c>) -> Self {
         Self {
             inner: HashMap::new(),
-            block
+            block,
         }
     }
 
@@ -38,13 +45,13 @@ impl<'c, 'a> Environment<'c, 'a> {
             frames: vec![Rc::new(Frame::new(block))], // global frame
         }
     }
-    
+
     pub fn extend<'a2: 'a>(&self, block: &'a2 ir::Block<'c>) -> Self {
         let mut frames = self.frames.clone();
         frames.push(Rc::new(Frame::new(block)));
         Self { frames }
     }
-    
+
     pub fn block(&self) -> &'a ir::Block<'c> {
         self.frames.last().unwrap().block
     }
@@ -78,19 +85,22 @@ impl<'c> Compiler<'c> {
 
         Self { ctx, loc, module }
     }
-    
+
     pub fn compile_stmt<'a>(&self, env: &mut Environment<'c, 'a>, stmt: Stmt) {
         match stmt {
             Stmt::Expr(expr) => {
                 let _ = self.compile_expr(env, expr);
-            },
-            Stmt::Let { name: Ident(name), expr } => {
+            }
+            Stmt::Let {
+                name: Ident(name),
+                expr,
+            } => {
                 let v = self.compile_expr_val(env, *expr);
 
                 if !env.decl(name.clone(), NameValue::Value(v)) {
                     panic!("redeclared variable {name}");
                 }
-            },
+            }
             Stmt::Break => todo!(),
             Stmt::Continue => todo!(),
             Stmt::Return(expr) => {
@@ -100,7 +110,7 @@ impl<'c> Compiler<'c> {
                 } else {
                     env.block().append_operation(func::r#return(&[], self.loc));
                 }
-            },
+            }
             Stmt::While { pred, body } => {
                 let before_region = {
                     let loc = self.loc.clone();
@@ -108,7 +118,11 @@ impl<'c> Compiler<'c> {
                     let block = region.append_block(ir::Block::new(&[]));
                     let mut env = env.extend(&block);
                     let val = self.compile_expr_block_optim(&mut env, *pred);
-                    block.append_operation(scf::condition(val.expect("a value is returned"), &[], loc));
+                    block.append_operation(scf::condition(
+                        val.expect("a value is returned"),
+                        &[],
+                        loc,
+                    ));
                     region
                 };
                 let after_region = {
@@ -122,47 +136,77 @@ impl<'c> Compiler<'c> {
 
                 let whl = scf::r#while(&[], &[], before_region, after_region, self.loc);
                 env.block().append_operation(whl);
-            },
-            Stmt::Fn { name: Ident(name), params, expr } => {
-                let arg_types = params.iter().map(|_| self.int_ref_type()).collect::<Vec<_>>();
-                let arg_types_with_loc = arg_types.iter().cloned().map(|t| (t, self.loc)).collect::<Vec<_>>();
+            }
+            Stmt::Fn {
+                name: Ident(name),
+                params,
+                expr,
+            } => {
+                let arg_types = params
+                    .iter()
+                    .map(|_| self.int_ref_type())
+                    .collect::<Vec<_>>();
+                let arg_types_with_loc = arg_types
+                    .iter()
+                    .cloned()
+                    .map(|t| (t, self.loc))
+                    .collect::<Vec<_>>();
                 let ret_type = self.int_ref_type();
 
                 // TODO currently only int params
                 // TODO currently int return (not even void)
-                let fn_type = ir::attribute::TypeAttribute::new(ir::r#type::FunctionType::new(&self.ctx, &arg_types, &[ret_type]).into());
+                let fn_type = ir::attribute::TypeAttribute::new(
+                    ir::r#type::FunctionType::new(&self.ctx, &arg_types, &[ret_type]).into(),
+                );
                 let fn_attr = ir::attribute::StringAttribute::new(&self.ctx, &name.clone());
-                let fn_op = func::func(&self.ctx, fn_attr, fn_type, {
-                    let region = ir::Region::new();
-                    let block = ir::Block::new(&arg_types_with_loc);
-                    let mut env = env.extend(&block);
-                    let mut i = 0;
-                    for Ident(p) in params {
-                        let v = block.argument(i).unwrap().into();
-                        if !env.decl(p.clone(), NameValue::Value(v)) {
-                            panic!("redeclared argument {p}");
+                let fn_op = func::func(
+                    &self.ctx,
+                    fn_attr,
+                    fn_type,
+                    {
+                        let region = ir::Region::new();
+                        let block = ir::Block::new(&arg_types_with_loc);
+                        let mut env = env.extend(&block);
+                        let mut i = 0;
+                        for Ident(p) in params {
+                            let v = block.argument(i).unwrap().into();
+                            if !env.decl(p.clone(), NameValue::Value(v)) {
+                                panic!("redeclared argument {p}");
+                            }
+                            i += 1;
                         }
-                        i+=1;
-                    }
-                    let _val = self.compile_expr_block_optim(&mut env, *expr);
-                    let block = region.append_block(block);
-                    region
-                }, &[], self.loc);
+                        let _val = self.compile_expr_block_optim(&mut env, *expr);
+                        let block = region.append_block(block);
+                        region
+                    },
+                    &[],
+                    self.loc,
+                );
                 env.block().append_operation(fn_op);
-                if !env.decl(name.clone(), NameValue::Function { name: name.clone(), inputs: arg_types, outputs: vec![ret_type]} ) {
+                if !env.decl(
+                    name.clone(),
+                    NameValue::Function {
+                        name: name.clone(),
+                        inputs: arg_types,
+                        outputs: vec![ret_type],
+                    },
+                ) {
                     panic!("redeclared function {name}");
                 }
-            },
+            }
         }
     }
 }
-
 
 #[cfg(test)]
 pub mod tests {
     use std::{io::Read, ops::Deref};
 
-    use melior::{dialect::DialectRegistry, ir::{Block, Operation}, utility::{register_all_dialects, register_all_llvm_translations}};
+    use melior::{
+        dialect::DialectRegistry,
+        ir::{Block, Operation},
+        utility::{register_all_dialects, register_all_llvm_translations},
+    };
 
     use crate::{ast::Value, parser::parse, translate};
 
@@ -185,10 +229,19 @@ pub mod tests {
         let mut compiler = Compiler::new(&ctx);
         let blkref = compiler.module.body();
         let mut env = Environment::new(&blkref);
-        compiler.compile_stmt(&mut env, Stmt::While {
-            pred: Box::new(Expr::Unary{ op: crate::ast::UnaryOp::Not, expr: Box::new(Expr::Literal(Value::Bool(true)))}),
-            body: Box::new(Expr::Body { stmts: vec![], val: Box::new(Expr::Literal(Value::Int(1))) }),
-        });
+        compiler.compile_stmt(
+            &mut env,
+            Stmt::While {
+                pred: Box::new(Expr::Unary {
+                    op: crate::ast::UnaryOp::Not,
+                    expr: Box::new(Expr::Literal(Value::Bool(true))),
+                }),
+                body: Box::new(Expr::Body {
+                    stmts: vec![],
+                    val: Box::new(Expr::Literal(Value::Int(1))),
+                }),
+            },
+        );
         assert!(compiler.module.as_operation().verify());
         compiler.module.as_operation().dump();
 
@@ -199,7 +252,6 @@ pub mod tests {
         eprintln!("{}", wasm);
     }
 
-
     #[test]
     fn test_decl_int() {
         let ctx = setup_ctx();
@@ -207,16 +259,28 @@ pub mod tests {
         let mut compiler = Compiler::new(&ctx);
         let blkref = compiler.module.body();
         let mut env = Environment::new(&blkref);
-        let let_a = Stmt::Let { name: Ident("a".to_string()), expr: Box::new(Expr::Literal(Value::Int(1))) };
+        let let_a = Stmt::Let {
+            name: Ident("a".to_string()),
+            expr: Box::new(Expr::Literal(Value::Int(1))),
+        };
         let ret_32 = Stmt::Return(Box::new(Expr::Literal(Value::Int(32))));
-        compiler.compile_stmt(&mut env,  Stmt::Fn { name: Ident("_start".to_string()), params: vec![Ident("b".to_string())], expr: Box::new(Expr::Body { stmts: vec![let_a, ret_32], val: Box::new(Expr::Literal(Value::Void)) }) });
+        compiler.compile_stmt(
+            &mut env,
+            Stmt::Fn {
+                name: Ident("_start".to_string()),
+                params: vec![Ident("b".to_string())],
+                expr: Box::new(Expr::Body {
+                    stmts: vec![let_a, ret_32],
+                    val: Box::new(Expr::Literal(Value::Void)),
+                }),
+            },
+        );
         assert!(compiler.module.as_operation().verify());
         compiler.module.as_operation().dump();
 
         let mut output = translate::compile_program_text(&ctx, &mut compiler.module).unwrap();
         let mut o = String::new();
         output.read_to_string(&mut o).unwrap();
-
 
         eprintln!("{}", o);
         let mut output = translate::compile_and_run_program(&ctx, &mut compiler.module).unwrap();
@@ -231,7 +295,7 @@ pub mod tests {
         let blkref = compiler.module.body();
         let mut env = Environment::new(&blkref);
         let ast = parse(
-                r#"
+            r#"
                 fn add(a, b) {
                     let c = 1;
                     return c + a + b;
@@ -239,13 +303,12 @@ pub mod tests {
                  fn _start() {
                      return add(2, 3);
                 }
-            "#
-            );
+            "#,
+        );
         eprintln!("{:?}", ast);
         if let crate::ast::Ast::Stmt(stmt) = ast {
             compiler.compile_stmt(&mut env, stmt);
-        }
-        else if let crate::ast::Ast::Expr(expr) = ast {
+        } else if let crate::ast::Ast::Expr(expr) = ast {
             compiler.compile_expr(&mut env, expr);
         }
         assert!(compiler.module.as_operation().verify());
@@ -259,5 +322,4 @@ pub mod tests {
         let mut output = translate::compile_and_run_program(&ctx, &mut compiler.module).unwrap();
         eprintln!("{:?}", output);
     }
-
 }
