@@ -6,12 +6,12 @@ use gloo::utils::window;
 use gloo::{console::log, events::EventListener};
 use gloo_net::http::Request;
 use js_sys::{self, BigInt};
-use js_sys::{JSON::stringify, Function, Map, Object, Reflect, WebAssembly, WebAssembly::Memory};
+use js_sys::{Function, Map, Object, Reflect, WebAssembly, WebAssembly::Memory, JSON::stringify};
 use stylist::yew::{styled_component, Global};
-use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::HtmlElement;
+use web_sys::{CanvasRenderingContext2d, HtmlElement};
 use yew::prelude::*;
 use yew_autoprops::autoprops;
 
@@ -350,7 +350,7 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
     }
 }
 
-static STD_OUT : Mutex<String>  = Mutex::new(String::new());
+static STD_OUT: Mutex<String> = Mutex::new(String::new());
 
 #[styled_component]
 pub fn App() -> Html {
@@ -375,8 +375,8 @@ pub fn App() -> Html {
                     200 => {
                         let binary = res.binary().await.unwrap();
                         let result = execute(binary).await.unwrap();
-                        Imports.print(JsValue::from(result));
-                        out.set(STD_OUT.lock().unwrap().clone());
+                        let result = b_stringify(&result);
+                        out.set(STD_OUT.lock().unwrap().clone() + &result);
                         STD_OUT.lock().unwrap().clear();
                     }
                     _ => {
@@ -464,22 +464,108 @@ async fn execute(binary: Vec<u8>) -> Result<JsValue, JsValue> {
     // log!("Result", &res);
 }
 
+fn b_stringify(a: &JsValue) -> String {
+    if let Some(s) = a.as_string() {
+        s
+    } else if let Some(b) = a.dyn_ref::<BigInt>() {
+        b.to_string(10).unwrap().into()
+    } else {
+        stringify(&a).unwrap_throw().as_string().unwrap()
+    }
+}
+
 #[wasm_bindgen]
-pub struct Imports;
+pub struct Imports {
+    _canvas: web_sys::HtmlCanvasElement,
+    _context: CanvasRenderingContext2d,
+}
 
 #[wasm_bindgen]
 impl Imports {
-    pub fn print(&self, a: JsValue) {
-        let str : String;
-
-        if let Some(s) = a.as_string() {
-            str = s;
-        } else if let Some(b) = a.dyn_ref::<BigInt>() {
-            str = b.to_string(10).unwrap().into();
-        } else  {
-            str = stringify(&a).unwrap_throw().as_string().unwrap();
+    pub fn new() -> Imports {
+        Imports {
+            _canvas: JsValue::undefined().into(),
+            _context: JsValue::undefined().into(),
         }
+    }
+
+    pub fn print(&self, a: JsValue) {
+        let str = b_stringify(&a);
         STD_OUT.lock().unwrap().push_str(&str);
+    }
+
+    pub fn init_canvas(&mut self) {
+        self._canvas = web_sys::window()
+            .unwrap()
+            .open()
+            .unwrap()
+            .unwrap()
+            .document()
+            .unwrap()
+            .create_element("canvas")
+            .unwrap()
+            .dyn_into()
+            .unwrap();
+        self._context = self
+            ._canvas
+            .get_context("2d")
+            .unwrap()
+            .unwrap()
+            .dyn_into::<web_sys::CanvasRenderingContext2d>()
+            .unwrap();
+        self._context.begin_path();
+    }
+
+    pub fn clear_canvas(&self) {
+        self._context.clear_rect(
+            0.0,
+            0.0,
+            self._canvas.width() as f64,
+            self._canvas.height() as f64,
+        );
+        self._context.begin_path();
+    }
+
+    pub fn line_to(&self, x: f64, y: f64) {
+        self._context.line_to(x, y);
+    }
+
+    pub fn move_to(&self, x: f64, y: f64) {
+        self._context.move_to(x, y);
+    }
+
+    pub fn close_path(&self) {
+        self._context.close_path();
+    }
+
+    pub fn stroke_style(&self, style: &str) {
+        self._context.set_stroke_style(&JsValue::from_str(style));
+    }
+
+    pub fn stroke(&self) {
+        self._context.stroke();
+    }
+
+    pub fn fill_style(&self, style: &str) {
+        self._context.set_fill_style(&JsValue::from_str(style));
+    }
+
+    pub fn fill(&self) {
+        self._context.fill();
+    }
+
+    pub fn arc(&self, x: f64, y: f64, radius: f64, start_angle: f64, end_angle: f64) {
+        self._context
+            .arc(x, y, radius, start_angle, end_angle)
+            .unwrap();
+    }
+
+    pub fn quadratic_curve_to(&self, cpx: f64, cpy: f64, x: f64, y: f64) {
+        self._context.quadratic_curve_to(cpx, cpy, x, y);
+    }
+
+    pub fn bezier_curve_to(&self, cp1x: f64, cp1y: f64, cp2x: f64, cp2y: f64, x: f64, y: f64) {
+        self._context.bezier_curve_to(cp1x, cp1y, cp2x, cp2y, x, y);
     }
 }
 
@@ -495,16 +581,41 @@ fn bind(this: &JsValue, func_name: &str) -> Result<(), JsValue> {
 
 pub fn make_imports() -> Result<Object, JsValue> {
     let map = Map::new();
-    let imports: JsValue = Imports.into();
+    let imports: JsValue = Imports::new().into();
 
     // bind(&imports, "__linear_memory")?;
     let mem_descriptor = Object::new();
-    Reflect::set(&mem_descriptor, &JsValue::from("initial"), &JsValue::from(10)).unwrap();
-    Reflect::set(&mem_descriptor, &JsValue::from("maximum"), &JsValue::from(256)).unwrap();
+    Reflect::set(
+        &mem_descriptor,
+        &JsValue::from("initial"),
+        &JsValue::from(10),
+    )
+    .unwrap();
+    Reflect::set(
+        &mem_descriptor,
+        &JsValue::from("maximum"),
+        &JsValue::from(256),
+    )
+    .unwrap();
     let memory = &Memory::new(&mem_descriptor).unwrap();
-    Reflect::set(&imports,&JsValue::from("__linear_memory"), &memory).unwrap();
+    Reflect::set(&imports, &JsValue::from("__linear_memory"), &memory).unwrap();
+
+    // let canvas: JsValue = Canvas::new().into();
+    // Reflect::set(&imports, &JsValue::from("canvas"), &canvas).unwrap();
 
     bind(&imports, "print")?;
+    bind(&imports, "init_canvas")?;
+    bind(&imports, "clear_canvas")?;
+    bind(&imports, "line_to")?;
+    bind(&imports, "move_to")?;
+    bind(&imports, "close_path")?;
+    bind(&imports, "stroke_style")?;
+    bind(&imports, "stroke")?;
+    bind(&imports, "fill_style")?;
+    bind(&imports, "fill")?;
+    bind(&imports, "arc")?;
+    bind(&imports, "quadratic_curve_to")?;
+    bind(&imports, "bezier_curve_to")?;
 
     map.set(&JsValue::from("env"), &imports);
     Object::from_entries(&map.into())
