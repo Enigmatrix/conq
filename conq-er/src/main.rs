@@ -1,6 +1,6 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
-use std::result;
+use std::sync::Mutex;
 
 use gloo::utils::window;
 use gloo::{console::log, events::EventListener};
@@ -350,6 +350,8 @@ pub fn SplitPane(left: &Html, right: &Html) -> Html {
     }
 }
 
+static STD_OUT : Mutex<String>  = Mutex::new(String::new());
+
 #[styled_component]
 pub fn App() -> Html {
     let text_model = use_state_eq(|| TextModel::create(CONTENT, Some("rust"), None).unwrap());
@@ -372,12 +374,10 @@ pub fn App() -> Html {
                 match res.status() {
                     200 => {
                         let binary = res.binary().await.unwrap();
-                        let result = execute(binary).await.unwrap().into();
-                        let result = match stringify(&result) {
-                            Ok(s) => s.as_string().unwrap(),
-                            Err(_) => BigInt::new(&result).unwrap().to_string(10).unwrap().into(),
-                        };
-                        out.set(result);
+                        let result = execute(binary).await.unwrap();
+                        Imports.print(JsValue::from(result));
+                        out.set(STD_OUT.lock().unwrap().clone());
+                        STD_OUT.lock().unwrap().clear();
                     }
                     _ => {
                         let err = format!("Error: {}", res.text().await.unwrap());
@@ -455,7 +455,7 @@ async fn execute(binary: Vec<u8>) -> Result<JsValue, JsValue> {
         .unwrap();
     // let memory = Reflect::get(&instance.exports(), &"memory".into()).unwrap().dyn_into::<WebAssembly::Memory>().expect("memory export wasn't a `WebAssembly.Memory");
     // memory.grow(2);
-    // log!("Instance", &instance);
+    log!("Instance", &instance);
     let start = Reflect::get(&instance.exports(), &"_start".into()) // TODO: Export Start
         .unwrap()
         .dyn_into::<Function>()
@@ -466,6 +466,22 @@ async fn execute(binary: Vec<u8>) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub struct Imports;
+
+#[wasm_bindgen]
+impl Imports {
+    pub fn print(&self, a: JsValue) {
+        let str : String;
+
+        if let Some(s) = a.as_string() {
+            str = s;
+        } else if let Some(b) = a.dyn_ref::<BigInt>() {
+            str = b.to_string(10).unwrap().into();
+        } else  {
+            str = stringify(&a).unwrap_throw().as_string().unwrap();
+        }
+        STD_OUT.lock().unwrap().push_str(&str);
+    }
+}
 
 fn bind(this: &JsValue, func_name: &str) -> Result<(), JsValue> {
     let property_key = JsValue::from(func_name);
@@ -487,6 +503,8 @@ pub fn make_imports() -> Result<Object, JsValue> {
     Reflect::set(&mem_descriptor, &JsValue::from("maximum"), &JsValue::from(256)).unwrap();
     let memory = &Memory::new(&mem_descriptor).unwrap();
     Reflect::set(&imports,&JsValue::from("__linear_memory"), &memory).unwrap();
+
+    bind(&imports, "print")?;
 
     map.set(&JsValue::from("env"), &imports);
     Object::from_entries(&map.into())
