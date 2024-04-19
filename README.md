@@ -19,3 +19,8 @@ sudo apt install libmlir-17-dev
 ```
 
 ## conq-er
+
+```bash
+cargo build
+trunk serve --open conq-er/index.html
+```
