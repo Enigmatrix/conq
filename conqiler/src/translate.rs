@@ -45,15 +45,23 @@ pub fn compile_and_run_program(
     let llvmir_file = convert_mlir_to_llvmir(&llir)?;
     let wasm_file = convert_llvmir_to_wasm(llvmir_file)?;
     let linked_wasm_file = NamedTempFile::new()?;
+    let path = linked_wasm_file.path();
+
     let output = Command::new("wasm-ld-17")
+        .arg("--allow-undefined")
+        .arg("--export-all")
         .arg(wasm_file.path())
         .arg("-o")
-        .arg(linked_wasm_file.path())
+        .arg(path)
         .output()?;
+    
+    linked_wasm_file.persist("wat.wasm")?;
+    let path = "wat.wasm";
+
     eprintln!("{:?}", output);
     let output = Command::new("wasmer")
         .arg("run")
-        .arg(linked_wasm_file.path())
+        .arg(path)
         .output()?;
     Ok(output)
 }
