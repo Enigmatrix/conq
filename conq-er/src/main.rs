@@ -455,17 +455,22 @@ async fn execute(binary: Vec<u8>) -> Result<JsValue, JsValue> {
         .unwrap();
     // let memory = Reflect::get(&instance.exports(), &"memory".into()).unwrap().dyn_into::<WebAssembly::Memory>().expect("memory export wasn't a `WebAssembly.Memory");
     // memory.grow(2);
-    log!("Instance", &instance);
+    // log!("Instance", &instance);
     let start = Reflect::get(&instance.exports(), &"_start".into()) // TODO: Export Start
         .unwrap()
         .dyn_into::<Function>()
         .expect("entrypoint function start not found");
-    start.call1(&JsValue::undefined(), &JsValue::bigint_from_str("0"))
+    start.call1(&JsValue::undefined(), &0.into())
+
     // log!("Result", &res);
 }
 
 fn b_stringify(a: &JsValue) -> String {
-    if let Some(s) = a.as_string() {
+    if a.is_undefined() {
+        "undefined".to_string()
+    } else if a.is_null() {
+        "null".to_string()
+    }  else if let Some(s) = a.as_string() {
         s
     } else if let Some(b) = a.dyn_ref::<BigInt>() {
         b.to_string(10).unwrap().into()
@@ -478,15 +483,41 @@ fn b_stringify(a: &JsValue) -> String {
 pub struct Imports {
     _canvas: web_sys::HtmlCanvasElement,
     _context: CanvasRenderingContext2d,
+    _memory: Memory,
+    _mem_current: i64,
 }
 
 #[wasm_bindgen]
 impl Imports {
     pub fn new() -> Imports {
+        let mem_descriptor = Object::new();
+        Reflect::set(
+            &mem_descriptor,
+            &JsValue::from("initial"),
+            &JsValue::from(10),
+        )
+        .unwrap();
+        Reflect::set(
+            &mem_descriptor,
+            &JsValue::from("maximum"),
+            &JsValue::from(256),
+        )
+        .unwrap();
         Imports {
             _canvas: JsValue::undefined().into(),
             _context: JsValue::undefined().into(),
+            _memory: Memory::new(&mem_descriptor).unwrap(),
+            _mem_current: 0,
         }
+    }
+
+    pub fn malloc(&mut self, size: i64) -> i32 {
+        let mem_current = self._mem_current;
+        self._mem_current += size;
+        if self._mem_current > self._memory.buffer().dyn_into::<js_sys::ArrayBuffer>().unwrap().byte_length() as i64 {
+            self._memory.grow(1);
+        };
+        mem_current as i32
     }
 
     pub fn print(&self, a: JsValue) {
@@ -583,26 +614,12 @@ pub fn make_imports() -> Result<Object, JsValue> {
     let map = Map::new();
     let imports: JsValue = Imports::new().into();
 
-    // bind(&imports, "__linear_memory")?;
-    let mem_descriptor = Object::new();
-    Reflect::set(
-        &mem_descriptor,
-        &JsValue::from("initial"),
-        &JsValue::from(10),
-    )
-    .unwrap();
-    Reflect::set(
-        &mem_descriptor,
-        &JsValue::from("maximum"),
-        &JsValue::from(256),
-    )
-    .unwrap();
-    let memory = &Memory::new(&mem_descriptor).unwrap();
-    Reflect::set(&imports, &JsValue::from("__linear_memory"), &memory).unwrap();
+    // Reflect::set(&imports, &JsValue::from("__linear_memory"), &memory).unwrap();
 
     // let canvas: JsValue = Canvas::new().into();
     // Reflect::set(&imports, &JsValue::from("canvas"), &canvas).unwrap();
 
+    bind(&imports, "malloc")?;
     bind(&imports, "print")?;
     bind(&imports, "init_canvas")?;
     bind(&imports, "clear_canvas")?;
