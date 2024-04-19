@@ -364,7 +364,7 @@ pub fn App() -> Html {
             let text_model = text_model.clone();
             let out = out.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let res = Request::post("/api/sample")
+                let res = Request::post("/api/compile")
                     .header("Content-Type", "text/plain")
                     .body(text_model.get_value())
                     .unwrap()
@@ -374,6 +374,9 @@ pub fn App() -> Html {
                 match res.status() {
                     200 => {
                         let binary = res.binary().await.unwrap();
+
+                        log!("Binary", binary.len());
+
                         let result = execute(binary).await.unwrap();
                         let result = b_stringify(&result);
                         out.set(STD_OUT.lock().unwrap().clone() + &result);
@@ -470,7 +473,7 @@ fn b_stringify(a: &JsValue) -> String {
         "undefined".to_string()
     } else if a.is_null() {
         "null".to_string()
-    }  else if let Some(s) = a.as_string() {
+    } else if let Some(s) = a.as_string() {
         s
     } else if let Some(b) = a.dyn_ref::<BigInt>() {
         b.to_string(10).unwrap().into()
@@ -514,7 +517,14 @@ impl Imports {
     pub fn malloc(&mut self, size: i64) -> i32 {
         let mem_current = self._mem_current;
         self._mem_current += size;
-        if self._mem_current > self._memory.buffer().dyn_into::<js_sys::ArrayBuffer>().unwrap().byte_length() as i64 {
+        if self._mem_current
+            > self
+                ._memory
+                .buffer()
+                .dyn_into::<js_sys::ArrayBuffer>()
+                .unwrap()
+                .byte_length() as i64
+        {
             self._memory.grow(1);
         };
         mem_current as i32
@@ -526,13 +536,14 @@ impl Imports {
     }
 
     pub fn init_canvas(&mut self) {
-        self._canvas = web_sys::window()
+        let document = web_sys::window()
             .unwrap()
             .open()
             .unwrap()
             .unwrap()
             .document()
-            .unwrap()
+            .unwrap();
+        self._canvas = document
             .create_element("canvas")
             .unwrap()
             .dyn_into()

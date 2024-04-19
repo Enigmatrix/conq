@@ -1,12 +1,9 @@
-canvas_init();
-
-let rad_delta = 1;
-let rad_angle = 0;
-let radius = 20;
-
-while rad_angle <= 2 * math_pi() {
-    let x = radius * math_cos(rad_angle);
-    let y = radius * math_sin(rad_angle);
-    canvas_draw_point(x, y);
-    rad_angle = rad_angle + rad_delta;
+fn _start() {
+    let a = 2;
+    let b = 3;
+    b = 5;
+    let c = a == 2;
+    if a == 2 { b = 45; } else { b = 67; };
+    init_canvas();
+    return b;
 }

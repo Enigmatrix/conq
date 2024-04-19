@@ -1,8 +1,13 @@
 use core::panic;
 use std::{collections::HashMap, ops::DerefMut, process::Output, rc::Rc};
 
-use melior::{dialect::*, ir::{self}, Context};
 use crate::type_decl::Type;
+use melior::{
+    dialect::*,
+    ir::{self},
+    utility::{register_all_dialects, register_all_llvm_translations},
+    Context,
+};
 
 use crate::{
     ast::{Ast, Expr, Ident, Stmt},
@@ -15,7 +20,7 @@ pub enum NameValue<'c, 'a> {
         name: String,
         inputs: Vec<ir::Type<'c>>,
         outputs: Vec<ir::Type<'c>>,
-        typ: Type
+        typ: Type,
     },
 }
 
@@ -108,7 +113,8 @@ impl<'c> Compiler<'c> {
             Stmt::Return(expr) => {
                 let v = self.compile_expr(env, *expr);
                 if let Some(v) = v {
-                    env.block().append_operation(func::r#return(&[v.0], self.loc));
+                    env.block()
+                        .append_operation(func::r#return(&[v.0], self.loc));
                 } else {
                     env.block().append_operation(func::r#return(&[], self.loc));
                 }
@@ -121,11 +127,7 @@ impl<'c> Compiler<'c> {
                     let mut env = env.extend(&block);
                     let val = self.compile_expr_block_optim(&mut env, *pred);
                     let val = self.load(&mut env, val.expect("a value is returned").0);
-                    block.append_operation(scf::condition(
-                        val,
-                        &[],
-                        loc,
-                    ));
+                    block.append_operation(scf::condition(val, &[], loc));
                     region
                 };
                 let after_region = {
@@ -206,7 +208,13 @@ impl<'c> Compiler<'c> {
         }
     }
 
-    pub fn define_import(&self, env: &mut Environment<'c, 'c>, name: &str, args: Vec<Type>, out: Vec<Type>) {
+    pub fn define_import(
+        &self,
+        env: &mut Environment<'c, 'c>,
+        name: &str,
+        args: Vec<Type>,
+        out: Vec<Type>,
+    ) {
         let attrs = vec![(
             ir::Identifier::new(&self.ctx, "sym_visibility").into(),
             ir::attribute::StringAttribute::new(&self.ctx, "private").into(),
@@ -228,7 +236,18 @@ impl<'c> Compiler<'c> {
             &attrs,
             self.loc,
         );
-        if !env.decl(name.to_string(), NameValue::Function { name: name.to_string(), inputs: typed_args, outputs: typed_out, typ: Type::Function { args, ret: out.first().cloned().map(Box::new) } }) {
+        if !env.decl(
+            name.to_string(),
+            NameValue::Function {
+                name: name.to_string(),
+                inputs: typed_args,
+                outputs: typed_out,
+                typ: Type::Function {
+                    args,
+                    ret: out.first().cloned().map(Box::new),
+                },
+            },
+        ) {
             panic!("redeclared imported function {name}");
         }
         self.module.body().append_operation(fn_op);
@@ -242,9 +261,31 @@ impl<'c> Compiler<'c> {
         self.define_import(env, "close_path", vec![], vec![]);
         // self.define_import(env, "stroke_style", vec![Type::String], vec![]);
         self.define_import(env, "fill", vec![], vec![]);
-        self.define_import(env, "arc", vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], vec![]);
-        self.define_import(env, "quadratic_curve_to", vec![Type::Int, Type::Int, Type::Int, Type::Int], vec![]);
-        self.define_import(env, "bezier_curve_to", vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], vec![]);
+        self.define_import(
+            env,
+            "arc",
+            vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int],
+            vec![],
+        );
+        self.define_import(
+            env,
+            "quadratic_curve_to",
+            vec![Type::Int, Type::Int, Type::Int, Type::Int],
+            vec![],
+        );
+        self.define_import(
+            env,
+            "bezier_curve_to",
+            vec![
+                Type::Int,
+                Type::Int,
+                Type::Int,
+                Type::Int,
+                Type::Int,
+                Type::Int,
+            ],
+            vec![],
+        );
     }
 
     pub fn compile(&self, ast: Expr) {
@@ -260,6 +301,16 @@ impl<'c> Compiler<'c> {
     }
 }
 
+pub fn setup_ctx() -> Context {
+    let registry = DialectRegistry::new();
+    register_all_dialects(&registry);
+    let ctx = Context::new();
+    ctx.append_dialect_registry(&registry);
+    ctx.load_all_available_dialects();
+    register_all_llvm_translations(&ctx);
+    ctx
+}
+
 #[cfg(test)]
 pub mod tests {
     use std::{io::Read, ops::Deref};
@@ -267,22 +318,11 @@ pub mod tests {
     use melior::{
         dialect::DialectRegistry,
         ir::{Block, Operation},
-        utility::{register_all_dialects, register_all_llvm_translations},
     };
 
     use crate::{ast::Value, parser::parse, translate};
 
     use super::*;
-
-    pub fn setup_ctx() -> Context {
-        let registry = DialectRegistry::new();
-        register_all_dialects(&registry);
-        let ctx = Context::new();
-        ctx.append_dialect_registry(&registry);
-        ctx.load_all_available_dialects();
-        register_all_llvm_translations(&ctx);
-        ctx
-    }
 
     #[test]
     fn test_name() {
@@ -365,8 +405,9 @@ pub mod tests {
                  fn _start() {
                      return add(2, 3);
                 }
-            "#
-        ).unwrap();
+            "#,
+        )
+        .unwrap();
         eprintln!("{:?}", ast);
         // if let crate::ast::Ast::Stmt(stmt) = ast {
         //     compiler.compile_stmt(&mut env, stmt);
@@ -405,7 +446,8 @@ pub mod tests {
                     return b;
                 }
             "#,
-        ).unwrap();
+        )
+        .unwrap();
         eprintln!("{:?}", ast);
         compiler.compile(ast);
         compiler.module.as_operation().dump();

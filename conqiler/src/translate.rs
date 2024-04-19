@@ -1,7 +1,7 @@
 use std::{
     error::Error,
     fs::File,
-    io::Write,
+    io::{Read, Seek, Write},
     process::{Command, Output},
 };
 
@@ -35,6 +35,34 @@ pub fn compile_program(
     Ok(wasm_file.into_file())
 }
 
+pub fn compile_and_get_bytes(
+    context: &melior::Context,
+    module: &mut melior::ir::Module,
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    lower_to_llvm_dialect(&context, module)?;
+
+    let llir = module.as_operation().to_string();
+    let llvmir_file = convert_mlir_to_llvmir(&llir)?;
+    let wasm_file = convert_llvmir_to_wasm(llvmir_file)?;
+    let mut linked_wasm_file = NamedTempFile::new()?;
+    let path = linked_wasm_file.path();
+
+    let output = Command::new("wasm-ld-17")
+        .arg("--allow-undefined")
+        .arg("--export-all")
+        .arg(wasm_file.path())
+        .arg("-o")
+        .arg(path)
+        .output()?;
+
+    linked_wasm_file.persist("wat.wasm")?;
+    let mut buf = Vec::new();
+    let mut f = File::open("wat.wasm")?;
+    f.read_to_end(&mut buf)?;
+    eprintln!("Buffer: {:?}", buf);
+    Ok(buf)
+}
+
 pub fn compile_and_run_program(
     context: &melior::Context,
     module: &mut melior::ir::Module,
@@ -59,10 +87,7 @@ pub fn compile_and_run_program(
     let path = "wat.wasm";
 
     eprintln!("{:?}", output);
-    let output = Command::new("wasmer")
-        .arg("run")
-        .arg(path)
-        .output()?;
+    let output = Command::new("wasmer").arg("run").arg(path).output()?;
     Ok(output)
 }
 

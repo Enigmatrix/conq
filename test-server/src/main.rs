@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-
+use conqiler::translate;
 use http_body_util::Full;
 use http_body_util::{combinators::BoxBody, BodyExt, Empty};
 use hyper::body::Bytes;
@@ -11,9 +11,10 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
-
-use conqiler::compile::Compiler;
-
+use conqiler::{
+    parser::parse,
+    compile::{Compiler, Environment, setup_ctx},
+};
 
 /// This is our service handler. It receives a Request, routes on its
 /// path, and returns a Future of a Response.
@@ -41,10 +42,23 @@ async fn echo(
         }
 
         (&Method::POST, "/api/compile") => {
+            let bytes = req.collect().await.unwrap().to_bytes();
+            let code = String::from_utf8(bytes.to_vec()).unwrap();
+
+            let ctx = setup_ctx();
+            let mut compiler = Compiler::new(&ctx);
+            let blkref = compiler.module.body();
+            let env = Environment::new(&blkref);
+
+            let ast = parse(&code).unwrap();
+            compiler.compile(ast);
+
+            let wasm = translate::compile_and_get_bytes(&ctx, &mut compiler.module).unwrap();
+
             // TODO
             Ok(Response::builder()
-                .status(StatusCode::NOT_IMPLEMENTED)
-                .body(full("Not implemented"))
+                .status(StatusCode::OK)
+                .body(full(wasm))
                 .unwrap())
         }
 

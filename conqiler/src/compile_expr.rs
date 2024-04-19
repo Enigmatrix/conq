@@ -284,7 +284,7 @@ impl<'c> Compiler<'c> {
         let cond = self.load(env, cond);
         let mut typ = None;
         let mut a = None;
-        
+
         let (then_region, else_region) = {
             let then_region = ir::Region::new();
             let then_block = then_region.append_block(ir::Block::new(&[]));
@@ -308,7 +308,7 @@ impl<'c> Compiler<'c> {
             } else {
                 else_block.append_operation(scf::r#yield(&[], self.loc));
             }
-            
+
 
             if then_type != else_type {
                 panic!("conditional branches have different type")
@@ -361,7 +361,7 @@ impl<'c> Compiler<'c> {
                 &ret.iter().map(|t| self.into_type(t)).collect::<Vec<_>>(),
                 self.loc,
             ));
-            
+
             if let Some(ret) = ret {
                 Some((val(v), *ret))
             } else {
@@ -409,9 +409,9 @@ impl<'c> Compiler<'c> {
                 crate::ast::Value::Void => todo!(),
             },
             Expr::Ident(Ident(name)) => {
-                
+
                 if name.starts_with("host_") {
-                    
+
                 }
 
                 let v = env.get(name.clone());
@@ -476,7 +476,7 @@ mod tests {
 
     use crate::{
         ast::Expr,
-        compile::{tests::setup_ctx, Compiler, Environment},
+        compile::{setup_ctx, Compiler, Environment},
     };
 
     #[test]
