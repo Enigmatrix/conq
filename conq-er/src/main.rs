@@ -546,15 +546,13 @@ impl Imports {
         self._canvas = document
             .create_element("canvas")
             .unwrap()
-            .dyn_into()
-            .unwrap();
+            .unchecked_into::<web_sys::HtmlCanvasElement>();
         self._context = self
             ._canvas
             .get_context("2d")
             .unwrap()
             .unwrap()
-            .dyn_into::<web_sys::CanvasRenderingContext2d>()
-            .unwrap();
+            .unchecked_into::<web_sys::CanvasRenderingContext2d>();
         self._context.begin_path();
     }
 

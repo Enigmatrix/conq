@@ -1,11 +1,12 @@
-use chumsky::prelude::*;
+use chumsky::{error::Cheap, prelude::*};
 
 use crate::ast::*;
 
-#[derive(Clone, Debug, PartialEq, Hash, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Bool(bool),
     Num(i32),
+    Float(f64),
     Str(String),
     Op(String),
     Ctrl(char),
@@ -21,8 +22,15 @@ pub enum Token {
 }
 
 // One iterative pass to prevent keyword capture
-fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
-    let num = text::int(10).map(|s: String| Token::Num(s.parse().unwrap()));
+fn lexer() -> impl Parser<char, Vec<Token>, Error = Cheap<char>> {
+    let num = text::int(10)
+        .then(just('.').ignore_then(text::digits(10)).or_not())
+        .map(|(int, frac)| {
+            match frac {
+                Some(frac) => Token::Float(format!("{}.{}", int, frac).parse().unwrap()),
+                None => Token::Num(int.parse().unwrap()),
+            }
+        });
     let str_ = none_of('"')
         .repeated()
         .delimited_by(just('"'), just('"'))
@@ -70,7 +78,7 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
     token.padded_by(comment.repeated()).padded().repeated()
 }
 
-pub fn lex_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
+pub fn parser() -> impl Parser<Token, Expr, Error = Cheap<Token>> {
     let ident = select! {
         Token::Ident(s) => Ident(s),
     };
@@ -78,6 +86,7 @@ pub fn lex_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     let val = select! {
         Token::Bool(b) => Value::Bool(b),
         Token::Num(n) => Value::Int(n),
+        Token::Float(f) => Value::Float(f),
         Token::Str(s) => Value::String(s),
     }
     .map(Expr::Literal);
@@ -274,8 +283,8 @@ pub fn lex_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     .then_ignore(end())
 }
 
-pub fn parse(s: &str) -> Result<Expr, Vec<Simple<Token>>> {
-    lex_parser().parse(lexer().parse(s).unwrap())
+pub fn parse(s: &str) -> Result<Expr, Vec<Cheap<Token>>> {
+    parser().parse(lexer().parse(s).unwrap())
 }
 
 const EXAMPLE: &str = r#"
@@ -605,12 +614,10 @@ mod tests {
                                 name: Ident("add2".to_string()),
                                 params: vec![Ident("a".to_string()), Ident("b".to_string())],
                                 expr: Box::new(Expr::Body {
-                                    stmts: vec![
-                                        Stmt::Let {
-                                            name: Ident("c".to_string()),
-                                            expr: Box::new(Expr::Literal(Value::Int(1))),
-                                        },
-                                    ],
+                                    stmts: vec![Stmt::Let {
+                                        name: Ident("c".to_string()),
+                                        expr: Box::new(Expr::Literal(Value::Int(1))),
+                                    },],
                                     val: Box::new(Expr::Binary {
                                         op: BinaryOp::Arith(ArithBinaryOp::Add),
                                         lhs: Box::new(Expr::Ident(Ident("a".to_string()))),

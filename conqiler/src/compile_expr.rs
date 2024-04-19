@@ -405,6 +405,7 @@ impl<'c> Compiler<'c> {
             Expr::Literal(v) => match v {
                 crate::ast::Value::Int(i) => Some(self.compile_literal_int(env, i)),
                 crate::ast::Value::Bool(b) => Some(self.compile_literal_bool(env, b)),
+                crate::ast::Value::Float(_) => todo!(),
                 crate::ast::Value::String(_) => todo!(),
                 crate::ast::Value::Void => todo!(),
             },
