@@ -5,7 +5,7 @@ use crate::ast::*;
 #[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub enum Token {
     Bool(bool),
-    Num(i64),
+    Num(i32),
     Str(String),
     Op(String),
     Ctrl(char),
@@ -70,7 +70,7 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
     token.padded_by(comment.repeated()).padded().repeated()
 }
 
-pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
+pub fn lex_parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     let ident = select! {
         Token::Ident(s) => Ident(s),
     };
@@ -274,10 +274,8 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     .then_ignore(end())
 }
 
-macro_rules! parser {
-    ($s:expr) => {
-        parser().parse(lexer().parse($s).unwrap())
-    };
+pub fn parse(s: &str) -> Result<Expr, Vec<Simple<Token>>> {
+    lex_parser().parse(lexer().parse(s).unwrap())
 }
 
 const EXAMPLE: &str = r#"
@@ -372,18 +370,18 @@ mod tests {
 
     #[test]
     fn parse_atom() {
-        assert_eq!(parser!(" 505  "), Ok(Expr::Literal(Value::Int(505))));
-        assert_eq!(parser!(" true "), Ok(Expr::Literal(Value::Bool(true))));
-        assert_eq!(parser!(" false "), Ok(Expr::Literal(Value::Bool(false))));
+        assert_eq!(parse(" 505  "), Ok(Expr::Literal(Value::Int(505))));
+        assert_eq!(parse(" true "), Ok(Expr::Literal(Value::Bool(true))));
+        assert_eq!(parse(" false "), Ok(Expr::Literal(Value::Bool(false))));
         assert_eq!(
-            parser!(" ! true "),
+            parse(" ! true "),
             Ok(Expr::Unary {
                 op: UnaryOp::Not,
                 expr: Box::new(Expr::Literal(Value::Bool(true)))
             })
         );
         assert_eq!(
-            parser!(" \"hello\" "),
+            parse(" \"hello\" "),
             Ok(Expr::Literal(Value::String("hello".to_string())))
         );
     }
@@ -391,7 +389,7 @@ mod tests {
     #[test]
     fn parse_neg() {
         assert_eq!(
-            parser!(" ---505  "),
+            parse(" ---505  "),
             Ok(Expr::Unary {
                 op: UnaryOp::Neg,
                 expr: Box::new(Expr::Unary {
@@ -408,7 +406,7 @@ mod tests {
     #[test]
     fn parse_arith() {
         assert_eq!(
-            parser!(" 1 + 2 * ( (3 - 4) / 5 ) % 6 "),
+            parse(" 1 + 2 * ( (3 - 4) / 5 ) % 6 "),
             // sub -> div -> mul -> mod -> add
             Ok(Expr::Binary {
                 op: BinaryOp::Arith(ArithBinaryOp::Add),
@@ -437,7 +435,7 @@ mod tests {
     #[test]
     fn parse_logical_compare() {
         assert_eq!(
-            parser!(" 1 < 2 && 3 > 4 || false != true"),
+            parse(" 1 < 2 && 3 > 4 || false != true"),
             Ok(Expr::Binary {
                 op: BinaryOp::Logical(LogicalBinaryOp::Or),
                 lhs: Box::new(Expr::Binary {
@@ -465,7 +463,7 @@ mod tests {
     #[test]
     fn parse_ident_let() {
         assert_eq!(
-            parser!("let a = 0; a = 1 ; a + 4"),
+            parse("let a = 0; a = 1 ; a + 4"),
             Ok(Expr::Body {
                 stmts: vec![
                     Stmt::Let {
@@ -489,7 +487,7 @@ mod tests {
     #[test]
     fn parse_block() {
         assert_eq!(
-            parser!(
+            parse(
                 r#"
                 {
                     1 + 2
@@ -538,7 +536,7 @@ mod tests {
     #[test]
     fn parse_cond() {
         assert_eq!(
-            parser!(
+            parse(
                 r#"
                 if true {
                     1
@@ -558,7 +556,7 @@ mod tests {
     #[test]
     fn parse_while() {
         assert_eq!(
-            parser!(
+            parse(
                 r#"
                 while test(true) == 1 {
                     1
@@ -585,7 +583,7 @@ mod tests {
     #[test]
     fn parse_fn_apply() {
         assert_eq!(
-            parser!(
+            parse(
                 r#"
                 fn add(a, b) {
                     fn add2 (a, b) {
@@ -645,7 +643,7 @@ mod tests {
     #[test]
     fn parse_example() {
         assert_eq!(
-            parser!(EXAMPLE),
+            parse(EXAMPLE),
             Ok(Expr::Body {
                 stmts: vec![
                     Stmt::Expr(Expr::Apply {
