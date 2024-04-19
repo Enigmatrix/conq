@@ -236,6 +236,15 @@ impl<'c> Compiler<'c> {
     
     pub fn define_imported(&self, env: &mut Environment<'c, 'c>) {
         self.define_import(env, "init_canvas", vec![], vec![]);
+        self.define_import(env, "clear_canvas", vec![], vec![]);
+        self.define_import(env, "line_to", vec![Type::Int, Type::Int], vec![]);
+        self.define_import(env, "move_to", vec![Type::Int, Type::Int], vec![]);
+        self.define_import(env, "close_path", vec![], vec![]);
+        // self.define_import(env, "stroke_style", vec![Type::String], vec![]);
+        self.define_import(env, "fill", vec![], vec![]);
+        self.define_import(env, "arc", vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], vec![]);
+        self.define_import(env, "quadratic_curve_to", vec![Type::Int, Type::Int, Type::Int, Type::Int], vec![]);
+        self.define_import(env, "bezier_curve_to", vec![Type::Int, Type::Int, Type::Int, Type::Int, Type::Int, Type::Int], vec![]);
     }
 
     pub fn compile(&self, ast: Ast) {
