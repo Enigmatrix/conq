@@ -318,7 +318,7 @@ impl<'c> Compiler<'c> {
         &self,
         env: &mut Environment<'c, 'a>,
         r#fn: Expr,
-        args: Vec<Expr>,
+        mut args: Vec<Expr>,
     ) -> Option<ir::Value<'c, 'a>> {
         let fn_val = self.compile_expr_val(env, r#fn);
         // eprintln!("fn_val: {fn_val}");
@@ -332,6 +332,9 @@ impl<'c> Compiler<'c> {
         // let fn_val = val(env.block().append_operation(op.clone()));
         //eprintln!(", op: {op}");
         //eprintln!("fn_val: {fn_val}, op: {op}");
+        if let Some(Expr::Literal(Value::Void)) = args.first() {
+            args.remove(0);
+        }
         let args = args
             .into_iter()
             .map(|arg| self.compile_expr_val(env, arg))
@@ -384,6 +387,11 @@ impl<'c> Compiler<'c> {
                 crate::ast::Value::Void => todo!(),
             },
             Expr::Ident(Ident(name)) => {
+                
+                if name.starts_with("host_") {
+                    
+                }
+
                 let v = env.get(name.clone());
                 if let Some(v) = v {
                     match v {

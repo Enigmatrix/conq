@@ -1,10 +1,10 @@
 use core::panic;
-use std::{collections::HashMap, ops::DerefMut, rc::Rc};
+use std::{collections::HashMap, ops::DerefMut, process::Output, rc::Rc};
 
-use melior::{dialect::*, ir, Context};
+use melior::{dialect::*, ir::{self, Type}, Context};
 
 use crate::{
-    ast::{Expr, Ident, Stmt},
+    ast::{Ast, Expr, Ident, Stmt},
     compile_expr::val,
 };
 
@@ -197,6 +197,47 @@ impl<'c> Compiler<'c> {
             }
         }
     }
+    
+    pub fn define_import(&self, env: &mut Environment<'c, 'c>, name: &str, args: Vec<Type<'c>>, out: Vec<Type<'c>>) {
+        let attrs = vec![(
+            ir::Identifier::new(&self.ctx, "sym_visibility").into(),
+            ir::attribute::StringAttribute::new(&self.ctx, "private").into(),
+        )];
+        let fn_type = ir::attribute::TypeAttribute::new(
+            ir::r#type::FunctionType::new(&self.ctx, &args, &out).into(),
+        );
+        let fn_attr = ir::attribute::StringAttribute::new(&self.ctx, &name.clone());
+        let fn_op = func::func(
+            &self.ctx,
+            fn_attr,
+            fn_type,
+            {
+                let region = ir::Region::new();
+                region
+            },
+            &attrs,
+            self.loc,
+        );
+        if !env.decl(name.to_string(), NameValue::Function { name: name.to_string(), inputs: args, outputs: out }) {
+            panic!("redeclared imported function {name}");
+        }
+        self.module.body().append_operation(fn_op);
+    }
+    
+    pub fn define_imported(&self, env: &mut Environment<'c, 'c>) {
+        self.define_import(env, "init_canvas", vec![], vec![]);
+    }
+
+    pub fn compile(&self, ast: Ast) {
+        let gbody = self.module.body();
+        let mut env = Environment::new(&gbody);
+        self.define_imported(&mut env);
+        
+        match ast {
+            Ast::Stmt(stmt) => self.compile_stmt(&mut env, stmt),
+            Ast::Expr(expr) => drop(self.compile_expr(&mut env, expr)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -339,16 +380,13 @@ pub mod tests {
                     b = 5;
                     let c = a == 2;
                     if a == 2 { b = 45; } else { b = 67; };
+                    init_canvas();
                     return b;
                 }
             "#,
         );
         eprintln!("{:?}", ast);
-        if let crate::ast::Ast::Stmt(stmt) = ast {
-            compiler.compile_stmt(&mut env, stmt);
-        } else if let crate::ast::Ast::Expr(expr) = ast {
-            compiler.compile_expr(&mut env, expr);
-        }
+        compiler.compile(ast);
         compiler.module.as_operation().dump();
         assert!(compiler.module.as_operation().verify());
 
