@@ -5,7 +5,7 @@ use crate::ast::*;
 #[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub enum Token {
     Bool(bool),
-    Num(i64),
+    Num(i32),
     Str(String),
     Op(String),
     Ctrl(char),

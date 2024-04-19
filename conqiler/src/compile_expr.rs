@@ -14,7 +14,7 @@ pub fn val<'a, 'i>(x: ir::OperationRef<'a, 'i>) -> ir::Value<'a, 'i> {
 
 impl<'c> Compiler<'c> {
     pub fn int_type(&self) -> ir::Type<'c> {
-        ir::r#type::IntegerType::new(&self.ctx, 64).into()
+        ir::r#type::IntegerType::new(&self.ctx, 32).into()
     }
 
     fn bool_type(&self) -> ir::Type<'c> {
@@ -31,7 +31,7 @@ impl<'c> Compiler<'c> {
 
     fn assert_int_ref_type(&self, v: ir::Value<'c, '_>) {
         if !v.r#type().eq(&self.int_ref_type()) {
-            panic!("expected i64, got {v}");
+            panic!("expected i32, got {v}");
         }
     }
 
@@ -91,11 +91,11 @@ impl<'c> Compiler<'c> {
     pub fn compile_literal_int<'a>(
         &self,
         env: &mut Environment<'c, 'a>,
-        i: i64,
+        i: i32,
     ) -> ir::Value<'c, 'a> {
         let cnst = val(env.block().append_operation(arith::constant(
             &self.ctx,
-            ir::attribute::IntegerAttribute::new(self.int_type(), i).into(),
+            ir::attribute::IntegerAttribute::new(self.int_type(), i as i64).into(),
             self.loc,
         )));
         self.alloc_and_store(env, cnst, self.int_type())

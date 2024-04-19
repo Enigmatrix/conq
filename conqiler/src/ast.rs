@@ -44,7 +44,7 @@ pub enum UnaryOp {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Value {
-    Int(i64),
+    Int(i32),
     /*Float(f64),*/
     Bool(bool),
     String(String),
