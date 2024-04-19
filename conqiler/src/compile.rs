@@ -1,7 +1,8 @@
 use core::panic;
 use std::{collections::HashMap, ops::DerefMut, process::Output, rc::Rc};
 
-use melior::{dialect::*, ir::{self, Type}, Context};
+use melior::{dialect::*, ir::{self}, Context};
+use crate::type_decl::Type;
 
 use crate::{
     ast::{Ast, Expr, Ident, Stmt},
@@ -9,11 +10,12 @@ use crate::{
 };
 
 pub enum NameValue<'c, 'a> {
-    Value(ir::Value<'c, 'a>),
+    Value(ir::Value<'c, 'a>, Type),
     Function {
         name: String,
         inputs: Vec<ir::Type<'c>>,
         outputs: Vec<ir::Type<'c>>,
+        typ: Type
     },
 }
 
@@ -95,9 +97,9 @@ impl<'c> Compiler<'c> {
                 name: Ident(name),
                 expr,
             } => {
-                let v = self.compile_expr_val(env, *expr);
+                let (v, vt) = self.compile_expr_val(env, *expr);
 
-                if !env.decl(name.clone(), NameValue::Value(v)) {
+                if !env.decl(name.clone(), NameValue::Value(v, vt)) {
                     panic!("redeclared variable {name}");
                 }
             }
@@ -106,7 +108,7 @@ impl<'c> Compiler<'c> {
             Stmt::Return(expr) => {
                 let v = self.compile_expr(env, *expr);
                 if let Some(v) = v {
-                    env.block().append_operation(func::r#return(&[v], self.loc));
+                    env.block().append_operation(func::r#return(&[v.0], self.loc));
                 } else {
                     env.block().append_operation(func::r#return(&[], self.loc));
                 }
@@ -118,7 +120,7 @@ impl<'c> Compiler<'c> {
                     let block = region.append_block(ir::Block::new(&[]));
                     let mut env = env.extend(&block);
                     let val = self.compile_expr_block_optim(&mut env, *pred);
-                    let val = self.load(&mut env, val.expect("a value is returned"));
+                    let val = self.load(&mut env, val.expect("a value is returned").0);
                     block.append_operation(scf::condition(
                         val,
                         &[],
@@ -171,7 +173,8 @@ impl<'c> Compiler<'c> {
                         let mut i = 0;
                         for Ident(p) in params {
                             let v = block.argument(i).unwrap().into();
-                            if !env.decl(p.clone(), NameValue::Value(v)) {
+                            // TODO args
+                            if !env.decl(p.clone(), NameValue::Value(v, Type::Int)) {
                                 panic!("redeclared argument {p}");
                             }
                             i += 1;
@@ -188,8 +191,13 @@ impl<'c> Compiler<'c> {
                     name.clone(),
                     NameValue::Function {
                         name: name.clone(),
-                        inputs: arg_types,
                         outputs: vec![ret_type],
+                        // TODO this type ;-;
+                        typ: Type::Function {
+                            args: arg_types.iter().map(|_| Type::Int).collect(),
+                            ret: Some(Box::new(Type::Int)),
+                        },
+                        inputs: arg_types,
                     },
                 ) {
                     panic!("redeclared function {name}");
@@ -198,13 +206,15 @@ impl<'c> Compiler<'c> {
         }
     }
     
-    pub fn define_import(&self, env: &mut Environment<'c, 'c>, name: &str, args: Vec<Type<'c>>, out: Vec<Type<'c>>) {
+    pub fn define_import(&self, env: &mut Environment<'c, 'c>, name: &str, args: Vec<Type>, out: Vec<Type>) {
         let attrs = vec![(
             ir::Identifier::new(&self.ctx, "sym_visibility").into(),
             ir::attribute::StringAttribute::new(&self.ctx, "private").into(),
         )];
+        let typed_args = args.iter().map(|x| self.into_type(x)).collect::<Vec<_>>();
+        let typed_out = out.iter().map(|x| self.into_type(x)).collect::<Vec<_>>();
         let fn_type = ir::attribute::TypeAttribute::new(
-            ir::r#type::FunctionType::new(&self.ctx, &args, &out).into(),
+            ir::r#type::FunctionType::new(&self.ctx, &typed_args, &typed_out).into(),
         );
         let fn_attr = ir::attribute::StringAttribute::new(&self.ctx, &name.clone());
         let fn_op = func::func(
@@ -218,7 +228,7 @@ impl<'c> Compiler<'c> {
             &attrs,
             self.loc,
         );
-        if !env.decl(name.to_string(), NameValue::Function { name: name.to_string(), inputs: args, outputs: out }) {
+        if !env.decl(name.to_string(), NameValue::Function { name: name.to_string(), inputs: typed_args, outputs: typed_out, typ: Type::Function { args, ret: out.first().cloned().map(Box::new) } }) {
             panic!("redeclared imported function {name}");
         }
         self.module.body().append_operation(fn_op);
