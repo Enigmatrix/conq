@@ -1,21 +1,26 @@
 // https://blog.theodo.com/2020/11/react-resizeable-split-panels/
 
-use gloo;
-use gloo::{utils::window, events::EventListener, console::log };
+use gloo::utils::window;
+use gloo::{console::log, events::EventListener};
+use gloo_net::http::Request;
 use stylist::yew::{styled_component, Global};
-use wasm_bindgen::{closure::Closure, JsCast};
+use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 use web_sys::HtmlElement;
 use yew::prelude::*;
 use yew_autoprops::autoprops;
 
-use monaco::{
-    api::{CodeEditorOptions, TextModel},
-    sys::editor::{BuiltinTheme, IStandaloneCodeEditor},
-    yew::{CodeEditor, CodeEditorLink},
-};
+use monaco::{api::TextModel, sys::editor::IStandaloneCodeEditor, yew::CodeEditorLink};
 
-mod execute;
-use execute::execute;
+mod editor;
+use editor::Editor;
+mod output;
+use output::Output;
+mod engine;
+use engine::exec_n_get_output;
+
+mod monaco_conq;
+
+const CONTENT: &str = include_str!("../static/init.cq");
 
 #[derive(Clone, PartialEq)]
 enum SplitAxis {
@@ -24,51 +29,6 @@ enum SplitAxis {
 }
 
 const MIN_AXIS: i32 = 200;
-
-const CONTENT: &str = include_str!("../static/init.rs");
-
-fn get_options() -> CodeEditorOptions {
-    CodeEditorOptions::default()
-        .with_language("rust".to_owned())
-        .with_value(CONTENT.to_owned())
-        .with_builtin_theme(BuiltinTheme::VsDark)
-        .with_automatic_layout(true)
-}
-
-#[derive(PartialEq, Properties)]
-pub struct EditorProps {
-    on_editor_created: Callback<CodeEditorLink>,
-    text_model: TextModel,
-}
-
-#[function_component]
-pub fn Editor(props: &EditorProps) -> Html {
-    let EditorProps {
-        on_editor_created,
-        text_model,
-    } = props;
-
-    html! {
-        <CodeEditor classes={"full"} options={ get_options().to_sys_options() } {on_editor_created} model={text_model.clone()} />
-    }
-}
-
-#[autoprops]
-#[styled_component]
-pub fn Output(children: &Children) -> Html {
-    html! {
-        <div class={css!(r#"
-            background: #222;
-            padding: 15px;
-            box-sizing: border-box;
-            color: #f2f2f2;
-            height: 100%;
-            width: 100%;
-        "#)}>
-            <pre>{children.clone()}</pre>
-        </div>
-    }
-}
 
 #[autoprops]
 #[styled_component]
@@ -319,26 +279,44 @@ pub fn App() -> Html {
     let text_model = use_state_eq(|| TextModel::create(CONTENT, Some("rust"), None).unwrap());
     let out = use_state_eq(|| String::from(CONTENT));
 
-    // https://github.com/siku2/rust-monaco/blob/main/examples/yew_events_keymapping/src/main.rs
-    let on_editor_created = {
-        // We need to clone the text_model/code so we can use them.
+    let on_run = {
         let text_model = text_model.clone();
         let out = out.clone();
-
-        // This is a javascript closure, used to pass to Monaco, using wasm-bindgen.
-        let js_closure = {
+        Callback::from(move |_| {
             let text_model = text_model.clone();
-
-            // We update the code state when the Monaco model changes.
-            // See https://yew.rs/docs/0.20.0/concepts/function-components/pre-defined-hooks
-            Closure::<dyn Fn()>::new(move || {
-                let res = execute(text_model.get_value());
-                match res {
-                    Ok(output) => out.set(output),
-                    Err(e) => log!("Error: ", e.to_string()),
+            let out = out.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let res = Request::post("/api/compile")
+                    .header("Content-Type", "text/plain")
+                    .body(text_model.get_value())
+                    .unwrap()
+                    .send()
+                    .await
+                    .unwrap();
+                match res.status() {
+                    200 => {
+                        let binary = res.binary().await.unwrap();
+                        let result = exec_n_get_output(binary).await;
+                        out.set(result);
+                    }
+                    _ => {
+                        let err = format!("Error: {}", res.text().await.unwrap());
+                        log!("Error", &err);
+                        out.set(err);
+                    }
                 }
-            })
-        };
+            });
+        })
+    };
+
+    // https://github.com/siku2/rust-monaco/blob/main/examples/yew_events_keymapping/src/main.rs
+    let on_editor_created = {
+        let text_model = text_model.clone();
+        let on_run = on_run.clone();
+
+        let js_closure: Closure<dyn FnMut()> = Closure::wrap(Box::new(move || {
+            on_run.emit(web_sys::MouseEvent::from(JsValue::NULL));
+        }));
 
         // Here we define our callback, we use use_callback as we want to re-render when dependencies change.
         // See https://yew.rs/docs/concepts/function-components/state#general-view-of-how-to-store-state
@@ -360,6 +338,7 @@ pub fn App() -> Html {
             },
         )
     };
+
     html! {
         <>
             // Global Styles can be applied with <Global /> component.
@@ -374,8 +353,7 @@ pub fn App() -> Html {
             <SplitPane
                 left={html!{<Editor {on_editor_created} text_model={(*text_model).clone()} />} }
                 right={html!{
-                    <Output>
-                        <p style="color:#888;">{"Press CTRL+Enter / Command+Enter to run\n\n"}</p>
+                    <Output on_run={on_run}>
                         {out.to_string()}
                     </Output>
                 }}
@@ -385,5 +363,6 @@ pub fn App() -> Html {
 }
 
 fn main() {
+    monaco_conq::register_conq();
     yew::Renderer::<App>::new().render();
 }
