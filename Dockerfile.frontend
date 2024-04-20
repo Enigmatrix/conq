@@ -1,5 +1,6 @@
 FROM rust:latest
 
+RUN rustup target add wasm32-unknown-unknown
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y trunk@0.19.1
 
@@ -17,7 +18,7 @@ RUN mkdir ./test-server/src; echo 'fn main() {}' > ./test-server/src/main.rs
 RUN cargo build --package conq-er
 
 COPY . .
+COPY Trunk.prod.toml Trunk.toml
 
 RUN cargo build --package conq-er
-RUN trunk build conq-er/index.html
-RUN ls -R; exit 1
+CMD ["trunk", "serve", "./conq-er/index.html", "--address", "0.0.0.0"]

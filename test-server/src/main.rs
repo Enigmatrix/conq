@@ -85,7 +85,7 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], 7878));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 7878));
 
     let listener = TcpListener::bind(addr).await?;
     println!("Listening on http://{}", addr);

@@ -4,11 +4,11 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     ports:
-      - "80:7878"
+      - "7878:7878"
 
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
     ports:
-      - "81:8000"
+      - "81:3000"
