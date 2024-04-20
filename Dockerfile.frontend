@@ -1,0 +1,23 @@
+FROM rust:latest
+
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+RUN cargo binstall -y trunk@0.19.1
+
+WORKDIR /app
+
+COPY Cargo.toml Cargo.lock ./
+
+COPY conq-er/Cargo.toml ./conq-er/
+COPY conqiler/Cargo.toml ./conqiler/
+COPY test-server/Cargo.toml ./test-server/
+RUN mkdir ./conq-er/src; echo 'fn main() {}' > ./conq-er/src/main.rs
+RUN mkdir ./conqiler/src; echo 'fn main() {}' > ./conqiler/src/main.rs
+RUN mkdir ./test-server/src; echo 'fn main() {}' > ./test-server/src/main.rs
+
+RUN cargo build --package conq-er
+
+COPY . .
+
+RUN cargo build --package conq-er
+RUN trunk build conq-er/index.html
+RUN ls -R; exit 1
