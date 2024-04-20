@@ -52,7 +52,7 @@ fn b_stringify(a: &JsValue) -> String {
 }
 
 #[wasm_bindgen]
-pub struct Imports {
+pub struct Env {
     _canvas: web_sys::HtmlCanvasElement,
     _context: CanvasRenderingContext2d,
     _memory: Memory,
@@ -60,8 +60,9 @@ pub struct Imports {
 }
 
 #[wasm_bindgen]
-impl Imports {
-    pub fn new() -> Imports {
+impl Env {
+
+    pub fn new() -> Env {
         let mem_descriptor = Object::new();
         Reflect::set(
             &mem_descriptor,
@@ -75,7 +76,7 @@ impl Imports {
             &JsValue::from(256),
         )
         .unwrap();
-        Imports {
+        Env {
             _canvas: JsValue::undefined().into(),
             _context: JsValue::undefined().into(),
             _memory: Memory::new(&mem_descriptor).unwrap(),
@@ -191,28 +192,28 @@ fn bind(this: &JsValue, func_name: &str) -> Result<(), JsValue> {
 
 pub fn make_imports() -> Result<Object, JsValue> {
     let map = Map::new();
-    let imports: JsValue = Imports::new().into();
+    let env: JsValue = Env::new().into();
 
     // Reflect::set(&imports, &JsValue::from("__linear_memory"), &memory).unwrap();
 
     // let canvas: JsValue = Canvas::new().into();
     // Reflect::set(&imports, &JsValue::from("canvas"), &canvas).unwrap();
 
-    bind(&imports, "malloc")?;
-    bind(&imports, "print")?;
-    bind(&imports, "init_canvas")?;
-    bind(&imports, "clear_canvas")?;
-    bind(&imports, "line_to")?;
-    bind(&imports, "move_to")?;
-    bind(&imports, "close_path")?;
-    bind(&imports, "stroke_style")?;
-    bind(&imports, "stroke")?;
-    bind(&imports, "fill_style")?;
-    bind(&imports, "fill")?;
-    bind(&imports, "arc")?;
-    bind(&imports, "quadratic_curve_to")?;
-    bind(&imports, "bezier_curve_to")?;
+    bind(&env, "malloc")?;
+    bind(&env, "print")?;
+    bind(&env, "init_canvas")?;
+    bind(&env, "clear_canvas")?;
+    bind(&env, "line_to")?;
+    bind(&env, "move_to")?;
+    bind(&env, "close_path")?;
+    bind(&env, "stroke_style")?;
+    bind(&env, "stroke")?;
+    bind(&env, "fill_style")?;
+    bind(&env, "fill")?;
+    bind(&env, "arc")?;
+    bind(&env, "quadratic_curve_to")?;
+    bind(&env, "bezier_curve_to")?;
 
-    map.set(&JsValue::from("env"), &imports);
+    map.set(&JsValue::from("env"), &env);
     Object::from_entries(&map.into())
 }
