@@ -63,16 +63,16 @@ pub fn compile_and_get_bytes(
     Ok(buf)
 }
 
-pub fn compile_and_run_program(
+pub fn compile_and_check_program(
     context: &melior::Context,
     module: &mut melior::ir::Module,
-) -> Result<Output, Box<dyn Error>> {
+) -> Result<(), Box<dyn Error>> {
     lower_to_llvm_dialect(&context, module)?;
 
     let llir = module.as_operation().to_string();
     let llvmir_file = convert_mlir_to_llvmir(&llir)?;
     let wasm_file = convert_llvmir_to_wasm(llvmir_file)?;
-    let linked_wasm_file = NamedTempFile::new()?;
+    let mut linked_wasm_file = NamedTempFile::new()?;
     let path = linked_wasm_file.path();
 
     let output = Command::new("wasm-ld-17")
@@ -82,13 +82,17 @@ pub fn compile_and_run_program(
         .arg("-o")
         .arg(path)
         .output()?;
+    
+    let (mut file, path) = linked_wasm_file.into_parts();
+    let mut nfile = File::open(path)?;
+    let mut buf = [0u8; 4];
+    nfile.read_exact(&mut buf)?;
+    if buf != [0, 0x61, 0x73, 0x6d] {
+        return Err(format!("{output:?}").into());
+    }
+    
 
-    linked_wasm_file.persist("wat.wasm")?;
-    let path = "wat.wasm";
-
-    eprintln!("{:?}", output);
-    let output = Command::new("wasmer").arg("run").arg(path).output()?;
-    Ok(output)
+    Ok(())
 }
 
 pub fn lower_to_llvm_dialect(

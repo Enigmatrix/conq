@@ -332,7 +332,6 @@ impl<'c> Compiler<'c> {
         mut args: Vec<Expr>,
     ) -> Option<(ir::Value<'c, 'a>, Type)> {
         let (fn_val, fn_ty) = self.compile_expr_val(env, r#fn);
-        eprintln!("fn_ty: {fn_ty:?}");
 
         // eprintln!("fn_val: {fn_val}");
         if let Type::Function { args: inp, ret } = fn_ty {
@@ -433,7 +432,7 @@ impl<'c> Compiler<'c> {
                             let fn_val = val(env.block().append_operation(op));
                             let body = env.block();
                             let gbody = self.module.body();
-                            eprintln!("body: {body}, gbody: {gbody} name: {name}, inp: {inputs:?}, out: {outputs:?}, typ: {typ:?}");
+                            // eprintln!("body: {body}, gbody: {gbody} name: {name}, inp: {inputs:?}, out: {outputs:?}, typ: {typ:?}");
                             Some((fn_val, typ.clone()))
                         }
                     }
@@ -477,28 +476,6 @@ mod tests {
 
     use crate::{
         ast::Expr,
-        compile::{setup_ctx, Compiler, Environment},
+        compile::{setup_ctx, Compiler, Environment}, translate,
     };
-
-    #[test]
-    fn test_literal_int() {
-        let ctx = setup_ctx();
-        let compiler = Compiler::new(&ctx);
-        let global_body = compiler.module.body();
-        let mut env = Environment::new(&global_body);
-        compiler.compile_expr(&mut env, Expr::Literal(crate::ast::Value::Int(1)));
-        assert!(compiler.module.as_operation().verify());
-        compiler.module.as_operation().dump();
-    }
-
-    #[test]
-    fn test_literal_bool() {
-        let ctx = setup_ctx();
-        let compiler = Compiler::new(&ctx);
-        let global_body = compiler.module.body();
-        let mut env = Environment::new(&global_body);
-        compiler.compile_expr(&mut env, Expr::Literal(crate::ast::Value::Bool(true)));
-        assert!(compiler.module.as_operation().verify());
-        compiler.module.as_operation().dump();
-    }
 }

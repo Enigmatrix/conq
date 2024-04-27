@@ -325,72 +325,7 @@ pub mod tests {
     use super::*;
 
     #[test]
-    fn test_name() {
-        let ctx = setup_ctx();
-
-        let mut compiler = Compiler::new(&ctx);
-        let blkref = compiler.module.body();
-        let mut env = Environment::new(&blkref);
-        compiler.compile_stmt(
-            &mut env,
-            Stmt::While {
-                pred: Box::new(Expr::Unary {
-                    op: crate::ast::UnaryOp::Not,
-                    expr: Box::new(Expr::Literal(Value::Bool(true))),
-                }),
-                body: Box::new(Expr::Body {
-                    stmts: vec![],
-                    val: Box::new(Expr::Literal(Value::Int(1))),
-                }),
-            },
-        );
-        assert!(compiler.module.as_operation().verify());
-        compiler.module.as_operation().dump();
-
-        let mut wasm_file = translate::compile_program_text(&ctx, &mut compiler.module).unwrap();
-        let mut wasm = String::new();
-        wasm_file.read_to_string(&mut wasm).unwrap();
-
-        eprintln!("{}", wasm);
-    }
-
-    #[test]
-    fn test_decl_int() {
-        let ctx = setup_ctx();
-
-        let mut compiler = Compiler::new(&ctx);
-        let blkref = compiler.module.body();
-        let mut env = Environment::new(&blkref);
-        let let_a = Stmt::Let {
-            name: Ident("a".to_string()),
-            expr: Box::new(Expr::Literal(Value::Int(1))),
-        };
-        let ret_32 = Stmt::Return(Box::new(Expr::Literal(Value::Int(32))));
-        compiler.compile_stmt(
-            &mut env,
-            Stmt::Fn {
-                name: Ident("_start".to_string()),
-                params: vec![Ident("b".to_string())],
-                expr: Box::new(Expr::Body {
-                    stmts: vec![let_a, ret_32],
-                    val: Box::new(Expr::Literal(Value::Void)),
-                }),
-            },
-        );
-        assert!(compiler.module.as_operation().verify());
-        compiler.module.as_operation().dump();
-
-        let mut output = translate::compile_program_text(&ctx, &mut compiler.module).unwrap();
-        let mut o = String::new();
-        output.read_to_string(&mut o).unwrap();
-
-        eprintln!("{}", o);
-        let mut output = translate::compile_and_run_program(&ctx, &mut compiler.module).unwrap();
-        eprintln!("{:?}", output);
-    }
-
-    #[test]
-    fn test_decl_int2() {
+    fn test_decl() {
         let ctx = setup_ctx();
 
         let mut compiler = Compiler::new(&ctx);
@@ -398,33 +333,40 @@ pub mod tests {
         let mut env = Environment::new(&blkref);
         let ast = parse(
             r#"
-                fn add(a, b) {
-                    let c = 1;
-                    return c + a + b;
-                }
                  fn _start() {
-                     return add(2, 3);
+                    let c = 1;
+                    return c;
                 }
             "#,
         )
         .unwrap();
-        eprintln!("{:?}", ast);
-        // if let crate::ast::Ast::Stmt(stmt) = ast {
-        //     compiler.compile_stmt(&mut env, stmt);
-        // } else if let crate::ast::Ast::Expr(expr) = ast {
-        //     compiler.compile_expr(&mut env, expr);
-        // }
         compiler.compile_expr(&mut env, ast);
         assert!(compiler.module.as_operation().verify());
-        compiler.module.as_operation().dump();
 
-        let mut output = translate::compile_program_text(&ctx, &mut compiler.module).unwrap();
-        let mut o = String::new();
-        output.read_to_string(&mut o).unwrap();
+        translate::compile_and_check_program(&ctx, &mut compiler.module).unwrap();
+    }
 
-        eprintln!("{}", o);
-        let mut output = translate::compile_and_run_program(&ctx, &mut compiler.module).unwrap();
-        eprintln!("{:?}", output);
+    #[test]
+    #[should_panic]
+    fn test_decl_bad() {
+        let ctx = setup_ctx();
+
+        let mut compiler = Compiler::new(&ctx);
+        let blkref = compiler.module.body();
+        let mut env = Environment::new(&blkref);
+        let ast = parse(
+            r#"
+                 fn _start() {
+                    let c = 1;
+                    return a;
+                }
+            "#,
+        )
+        .unwrap();
+        compiler.compile_expr(&mut env, ast);
+        assert!(compiler.module.as_operation().verify());
+
+        translate::compile_and_check_program(&ctx, &mut compiler.module).unwrap();
     }
 
     #[test]
@@ -437,28 +379,115 @@ pub mod tests {
         let ast = parse(
             r#"
                  fn _start() {
-                    let a = 2;
-                    let b = 3;
-                    b = 5;
-                    let c = a == 2;
-                    if a == 2 { b = 45; } else { b = 67; };
-                    init_canvas();
+                    let b = 0;
+                    if 2 == 2 { b = 45; } else { b = 67; };
                     return b;
                 }
             "#,
         )
         .unwrap();
-        eprintln!("{:?}", ast);
         compiler.compile(ast);
-        compiler.module.as_operation().dump();
         assert!(compiler.module.as_operation().verify());
 
-        let mut output = translate::compile_program_text(&ctx, &mut compiler.module).unwrap();
-        let mut o = String::new();
-        output.read_to_string(&mut o).unwrap();
-
-        eprintln!("{}", o);
-        let mut output = translate::compile_and_run_program(&ctx, &mut compiler.module).unwrap();
-        eprintln!("{:?}", output);
+        translate::compile_and_check_program(&ctx, &mut compiler.module).unwrap();
     }
+
+    #[test]
+    fn test_while() {
+        let ctx = setup_ctx();
+
+        let mut compiler = Compiler::new(&ctx);
+        let blkref = compiler.module.body();
+        let mut env = Environment::new(&blkref);
+        let ast = parse(
+            r#"
+                 fn _start() {
+                    let a = 0;
+                    let b = 0;
+                    while (a < 5) {
+                        b = b + 1;
+                        a = a + 1;
+                    }
+                    return b;
+                }
+            "#,
+        )
+        .unwrap();
+        compiler.compile_expr(&mut env, ast);
+        assert!(compiler.module.as_operation().verify());
+
+        translate::compile_and_check_program(&ctx, &mut compiler.module).unwrap();
+    }
+
+    #[test]
+    fn test_call() {
+        let ctx = setup_ctx();
+
+        let mut compiler = Compiler::new(&ctx);
+        let blkref = compiler.module.body();
+        let mut env = Environment::new(&blkref);
+        let ast = parse(
+            r#"
+                fn add (a, b) {
+                    return a+b;
+                }
+                fn _start() {
+                    return add(2, 3);
+                }
+            "#,
+        )
+        .unwrap();
+        compiler.compile_expr(&mut env, ast);
+        assert!(compiler.module.as_operation().verify());
+
+        translate::compile_and_check_program(&ctx, &mut compiler.module).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_call_wrong_number_args() {
+        let ctx = setup_ctx();
+
+        let mut compiler = Compiler::new(&ctx);
+        let blkref = compiler.module.body();
+        let mut env = Environment::new(&blkref);
+        let ast = parse(
+            r#"
+                fn add (a, b) {
+                    return a+b;
+                }
+                fn _start() {
+                    return add(2, 3, 1);
+                }
+            "#,
+        )
+        .unwrap();
+        compiler.compile_expr(&mut env, ast);
+        assert!(compiler.module.as_operation().verify());
+
+        translate::compile_and_check_program(&ctx, &mut compiler.module).unwrap();
+    }
+
+    #[test]
+    fn test_unary_neg() {
+        let ctx = setup_ctx();
+
+        let mut compiler = Compiler::new(&ctx);
+        let blkref = compiler.module.body();
+        let mut env = Environment::new(&blkref);
+        let ast = parse(
+            r#"
+                fn _start() {
+                    let a = 20;
+                    return -a;
+                }
+            "#,
+        )
+        .unwrap();
+        compiler.compile_expr(&mut env, ast);
+        assert!(compiler.module.as_operation().verify());
+
+        translate::compile_and_check_program(&ctx, &mut compiler.module).unwrap();
+    }
+
 }
