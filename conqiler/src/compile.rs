@@ -260,6 +260,7 @@ impl<'c> Compiler<'c> {
         self.define_import(env, "move_to", vec![Type::Int, Type::Int], vec![]);
         self.define_import(env, "close_path", vec![], vec![]);
         // self.define_import(env, "stroke_style", vec![Type::String], vec![]);
+        self.define_import(env, "stroke", vec![], vec![]);
         self.define_import(env, "fill", vec![], vec![]);
         self.define_import(
             env,

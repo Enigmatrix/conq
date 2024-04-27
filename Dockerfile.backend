@@ -14,7 +14,7 @@ RUN chmod +x ./llvm.sh; ./llvm.sh 17 all
 RUN rm llvm.sh
 # setup llvm 17 env including mlir
 RUN ln /usr/bin/llvm-config-17 /usr/bin/llvm-config
-RUN apt install -y libmlir-17-dev
+RUN apt install -y libmlir-17-dev mlir-17-tools
 
 WORKDIR /app
 

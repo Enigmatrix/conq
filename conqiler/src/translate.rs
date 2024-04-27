@@ -55,11 +55,10 @@ pub fn compile_and_get_bytes(
         .arg(path)
         .output()?;
 
-    linked_wasm_file.persist("wat.wasm")?;
+    let (mut file, path) = linked_wasm_file.into_parts();
+    let mut nfile = File::open(path)?;
     let mut buf = Vec::new();
-    let mut f = File::open("wat.wasm")?;
-    f.read_to_end(&mut buf)?;
-    eprintln!("Buffer: {:?}", buf);
+    nfile.read_to_end(&mut buf)?;
     Ok(buf)
 }
 
