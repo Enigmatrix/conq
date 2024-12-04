@@ -1,11 +1,12 @@
-use chumsky::prelude::*;
+use chumsky::{error::Cheap, prelude::*};
 
 use crate::ast::*;
 
-#[derive(Clone, Debug, PartialEq, Hash, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Bool(bool),
-    Num(i64),
+    Num(i32),
+    Float(f64),
     Str(String),
     Op(String),
     Ctrl(char),
@@ -21,8 +22,15 @@ pub enum Token {
 }
 
 // One iterative pass to prevent keyword capture
-fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
-    let num = text::int(10).map(|s: String| Token::Num(s.parse().unwrap()));
+fn lexer() -> impl Parser<char, Vec<Token>, Error = Cheap<char>> {
+    let num = text::int(10)
+        .then(just('.').ignore_then(text::digits(10)).or_not())
+        .map(|(int, frac)| {
+            match frac {
+                Some(frac) => Token::Float(format!("{}.{}", int, frac).parse().unwrap()),
+                None => Token::Num(int.parse().unwrap()),
+            }
+        });
     let str_ = none_of('"')
         .repeated()
         .delimited_by(just('"'), just('"'))
@@ -70,7 +78,7 @@ fn lexer() -> impl Parser<char, Vec<Token>, Error = Simple<char>> {
     token.padded_by(comment.repeated()).padded().repeated()
 }
 
-pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
+pub fn parser() -> impl Parser<Token, Expr, Error = Cheap<Token>> {
     let ident = select! {
         Token::Ident(s) => Ident(s),
     };
@@ -78,6 +86,7 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     let val = select! {
         Token::Bool(b) => Value::Bool(b),
         Token::Num(n) => Value::Int(n),
+        Token::Float(f) => Value::Float(f),
         Token::Str(s) => Value::String(s),
     }
     .map(Expr::Literal);
@@ -274,8 +283,8 @@ pub fn parser() -> impl Parser<Token, Expr, Error = Simple<Token>> {
     .then_ignore(end())
 }
 
-pub fn parse(s: &str) -> Ast {
-    Ast::Expr(parser().parse(lexer().parse(s).unwrap()).unwrap())
+pub fn parse(s: &str) -> Result<Expr, Vec<Cheap<Token>>> {
+    parser().parse(lexer().parse(s).unwrap())
 }
 
 const EXAMPLE: &str = r#"
@@ -370,28 +379,19 @@ mod tests {
 
     #[test]
     fn parse_atom() {
-        assert_eq!(
-            parse(" 505  "),
-            Ast::Expr(Expr::Literal(Value::Int(505)))
-        );
-        assert_eq!(
-            parse(" true "),
-            Ast::Expr(Expr::Literal(Value::Bool(true)))
-        );
-        assert_eq!(
-            parse(" false "),
-            Ast::Expr(Expr::Literal(Value::Bool(false)))
-        );
+        assert_eq!(parse(" 505  "), Ok(Expr::Literal(Value::Int(505))));
+        assert_eq!(parse(" true "), Ok(Expr::Literal(Value::Bool(true))));
+        assert_eq!(parse(" false "), Ok(Expr::Literal(Value::Bool(false))));
         assert_eq!(
             parse(" ! true "),
-            Ast::Expr(Expr::Unary {
+            Ok(Expr::Unary {
                 op: UnaryOp::Not,
                 expr: Box::new(Expr::Literal(Value::Bool(true)))
             })
         );
         assert_eq!(
             parse(" \"hello\" "),
-            Ast::Expr(Expr::Literal(Value::String("hello".to_string())))
+            Ok(Expr::Literal(Value::String("hello".to_string())))
         );
     }
 
@@ -399,7 +399,7 @@ mod tests {
     fn parse_neg() {
         assert_eq!(
             parse(" ---505  "),
-            Ast::Expr(Expr::Unary {
+            Ok(Expr::Unary {
                 op: UnaryOp::Neg,
                 expr: Box::new(Expr::Unary {
                     op: UnaryOp::Neg,
@@ -417,7 +417,7 @@ mod tests {
         assert_eq!(
             parse(" 1 + 2 * ( (3 - 4) / 5 ) % 6 "),
             // sub -> div -> mul -> mod -> add
-            Ast::Expr(Expr::Binary {
+            Ok(Expr::Binary {
                 op: BinaryOp::Arith(ArithBinaryOp::Add),
                 lhs: Box::new(Expr::Literal(Value::Int(1))),
                 rhs: Box::new(Expr::Binary {
@@ -445,7 +445,7 @@ mod tests {
     fn parse_logical_compare() {
         assert_eq!(
             parse(" 1 < 2 && 3 > 4 || false != true"),
-            Ast::Expr(Expr::Binary {
+            Ok(Expr::Binary {
                 op: BinaryOp::Logical(LogicalBinaryOp::Or),
                 lhs: Box::new(Expr::Binary {
                     op: BinaryOp::Logical(LogicalBinaryOp::And),
@@ -473,7 +473,7 @@ mod tests {
     fn parse_ident_let() {
         assert_eq!(
             parse("let a = 0; a = 1 ; a + 4"),
-            Ast::Expr(Expr::Body {
+            Ok(Expr::Body {
                 stmts: vec![
                     Stmt::Let {
                         name: Ident("a".to_string()),
@@ -509,7 +509,7 @@ mod tests {
                 a
             "#
             ),
-            Ast::Expr(Expr::Body {
+            Ok(Expr::Body {
                 stmts: vec![
                     Stmt::Expr(Expr::Binary {
                         op: BinaryOp::Arith(ArithBinaryOp::Add),
@@ -554,7 +554,7 @@ mod tests {
                 }
             "#
             ),
-            Ast::Expr(Expr::Cond {
+            Ok(Expr::Cond {
                 pred: Box::new(Expr::Literal(Value::Bool(true))),
                 conseq: Box::new(Expr::Literal(Value::Int(1))),
                 alt: Box::new(Expr::Literal(Value::Int(0))),
@@ -572,7 +572,7 @@ mod tests {
                 }
             "#
             ),
-            Ast::Expr(Expr::Body {
+            Ok(Expr::Body {
                 stmts: vec![Stmt::While {
                     pred: Box::new(Expr::Binary {
                         op: BinaryOp::Compare(CompareBinaryOp::Eq),
@@ -604,7 +604,7 @@ mod tests {
                 add(1, 2)()
             "#
             ),
-            Ast::Expr(Expr::Body {
+            Ok(Expr::Body {
                 stmts: vec![Stmt::Fn {
                     name: Ident("add".to_string()),
                     params: vec![Ident("a".to_string()), Ident("b".to_string())],
@@ -651,7 +651,7 @@ mod tests {
     fn parse_example() {
         assert_eq!(
             parse(EXAMPLE),
-            Ast::Expr(Expr::Body {
+            Ok(Expr::Body {
                 stmts: vec![
                     Stmt::Expr(Expr::Apply {
                         r#fn: Box::new(Expr::Ident(Ident("canvas_init".to_string()))),
